@@ -147,7 +147,10 @@ impl GameState {
         player_id: PlayerId,
         ask_value: i32,
     ) -> Vec<GameEffect> {
-        if !self.owned_shares.iter().any(|(pid, _)| *pid == player_id) {
+        let owned_count = self.owned_shares.iter().filter(|(pid, _)| *pid == player_id).count();
+        let asking_count = self.open_asks.iter().filter(|(pid, _)| *pid == player_id).count();
+
+        if owned_count <= asking_count {
             return vec![GameEffect::Notify {
                 player_id,
                 event: GameEvent::AskRejected { player_id, ask_value },
@@ -522,5 +525,51 @@ mod tests {
             .collect();
         assert!(notified_players.contains(&p1));
         assert!(notified_players.contains(&p2));
+    }
+
+    #[test]
+    fn test_ask_rejected_when_insufficient_shares() {
+        let p = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = GameState::init(vec![p], 100);
+
+        // Buy one share
+        engine.process_action(GameAction::Bid {
+            player_id: p,
+            bid_value: 50,
+        });
+        engine.process_action(GameAction::SetPrice(50));
+        assert_shares(&engine, p, 1, 50);
+
+        // First ask should succeed
+        let effects = engine.process_action(GameAction::Ask {
+            player_id: p,
+            ask_value: 60,
+        });
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                GameEffect::Notify {
+                    event: GameEvent::AskPlaced { .. },
+                    ..
+                }
+            )),
+            "First ask should be placed"
+        );
+        assert_open_asks(&engine, p, 1, 60);
+
+        // Second ask should be rejected - only 1 share but already 1 open ask
+        let effects = engine.process_action(GameAction::Ask {
+            player_id: p,
+            ask_value: 70,
+        });
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            effects[0],
+            GameEffect::Notify {
+                player_id,
+                event: GameEvent::AskRejected { player_id: rejected_id, ask_value: 70 },
+            } if player_id == p && rejected_id == p
+        ));
+        assert_open_asks(&engine, p, 1, 60);
     }
 }

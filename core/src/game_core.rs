@@ -25,6 +25,8 @@ pub enum GameAction {
 #[derive(Clone, Copy)]
 pub enum GameEvent {
     PriceChanged(i32),
+    BidPlaced { player_id: PlayerId, bid_value: i32 },
+    AskPlaced { player_id: PlayerId, ask_value: i32 },
     BidResolved { player_id: PlayerId, bid_value: i32 },
     AskResolved { player_id: PlayerId, ask_value: i32 },
     BidRejected { player_id: PlayerId, bid_value: i32 },
@@ -130,7 +132,14 @@ impl GameState {
 
         self.liquid_transactions.push((player_id, -bid_value));
         self.open_bids.push((player_id, bid_value));
-        vec![]
+
+        self.players
+            .iter()
+            .map(|&pid| GameEffect::Notify {
+                player_id: pid,
+                event: GameEvent::BidPlaced { player_id, bid_value },
+            })
+            .collect()
     }
 
     fn handle_ask(
@@ -146,7 +155,14 @@ impl GameState {
         }
 
         self.open_asks.push((player_id, ask_value));
-        vec![]
+
+        self.players
+            .iter()
+            .map(|&pid| GameEffect::Notify {
+                player_id: pid,
+                event: GameEvent::AskPlaced { player_id, ask_value },
+            })
+            .collect()
     }
 
     fn resolve_asks(&mut self) -> Vec<(PlayerId, i32)> {
@@ -437,5 +453,74 @@ mod tests {
 
         assert!(has_ask_resolved, "Expected ask resolved notification");
         assert_shares(&engine, p, 0, 0);
+    }
+
+    #[test]
+    fn test_bid_placed_notifications() {
+        let p1 = PlayerId(uuid::Uuid::new_v4());
+        let p2 = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = GameState::init(vec![p1, p2], 100);
+
+        let effects = engine.process_action(GameAction::Bid {
+            player_id: p1,
+            bid_value: 50,
+        });
+
+        // Both players should be notified of the bid
+        assert_eq!(effects.len(), 2);
+        let notified_players: Vec<_> = effects
+            .iter()
+            .filter_map(|e| match e {
+                GameEffect::Notify {
+                    player_id,
+                    event:
+                        GameEvent::BidPlaced {
+                            player_id: bidder,
+                            bid_value: 50,
+                        },
+                } if *bidder == p1 => Some(*player_id),
+                _ => None,
+            })
+            .collect();
+        assert!(notified_players.contains(&p1));
+        assert!(notified_players.contains(&p2));
+    }
+
+    #[test]
+    fn test_ask_placed_notifications() {
+        let p1 = PlayerId(uuid::Uuid::new_v4());
+        let p2 = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = GameState::init(vec![p1, p2], 100);
+
+        // p1 needs to own a share first
+        engine.process_action(GameAction::Bid {
+            player_id: p1,
+            bid_value: 50,
+        });
+        engine.process_action(GameAction::SetPrice(50));
+
+        let effects = engine.process_action(GameAction::Ask {
+            player_id: p1,
+            ask_value: 60,
+        });
+
+        // Both players should be notified of the ask
+        assert_eq!(effects.len(), 2);
+        let notified_players: Vec<_> = effects
+            .iter()
+            .filter_map(|e| match e {
+                GameEffect::Notify {
+                    player_id,
+                    event:
+                        GameEvent::AskPlaced {
+                            player_id: asker,
+                            ask_value: 60,
+                        },
+                } if *asker == p1 => Some(*player_id),
+                _ => None,
+            })
+            .collect();
+        assert!(notified_players.contains(&p1));
+        assert!(notified_players.contains(&p2));
     }
 }

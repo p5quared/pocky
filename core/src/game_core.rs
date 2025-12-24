@@ -16,10 +16,15 @@ pub struct GameState {
 }
 
 #[derive(Clone, Copy)]
-pub enum GameEvent {
-    Price(i32),
+pub enum GameAction {
+    SetPrice(i32),
     Bid { player_id: PlayerId, bid_value: i32 },
     Ask { player_id: PlayerId, ask_value: i32 },
+}
+
+#[derive(Clone, Copy)]
+pub enum GameEvent {
+    PriceChanged(i32),
     BidResolved { player_id: PlayerId, bid_value: i32 },
     AskResolved { player_id: PlayerId, ask_value: i32 },
     BidRejected { player_id: PlayerId, bid_value: i32 },
@@ -32,15 +37,14 @@ pub enum GameEffect {
 }
 
 impl GameState {
-    pub fn process_event(
+    pub fn process_action(
         &mut self,
-        action: GameEvent,
+        action: GameAction,
     ) -> Vec<GameEffect> {
         match action {
-            GameEvent::Price(price) => self.handle_price(price),
-            GameEvent::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
-            GameEvent::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
-            _ => vec![],
+            GameAction::SetPrice(price) => self.handle_price(price),
+            GameAction::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
+            GameAction::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
         }
     }
 }
@@ -71,7 +75,7 @@ impl GameState {
 
         let price_notifications = self.players.iter().map(|&player_id| GameEffect::Notify {
             player_id,
-            event: GameEvent::Price(price),
+            event: GameEvent::PriceChanged(price),
         });
 
         let bid_notifications = resolved_bids.into_iter().map(|(player_id, bid_value)| GameEffect::Notify {
@@ -262,15 +266,15 @@ mod tests {
     fn test_transactions() {
         let p = PlayerId(uuid::Uuid::new_v4());
         let mut engine = GameState::init(vec![p], 100);
-        engine.process_event(GameEvent::Bid {
+        engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 20,
         });
-        engine.process_event(GameEvent::Bid {
+        engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 40,
         });
-        engine.process_event(GameEvent::Bid {
+        engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 40,
         });
@@ -278,18 +282,18 @@ mod tests {
         assert_cash(&engine, p, 0);
         assert_open_bids(&engine, p, 3, 100);
 
-        engine.process_event(GameEvent::Price(30));
+        engine.process_action(GameAction::SetPrice(30));
         // 2 bids for 40 filled @30, refund 10 each
         assert_cash(&engine, p, 20);
         assert_shares(&engine, p, 2, 60);
         assert_open_bids(&engine, p, 1, 20);
 
-        engine.process_event(GameEvent::Ask {
+        engine.process_action(GameAction::Ask {
             player_id: p,
             ask_value: 75,
         });
         assert_open_asks(&engine, p, 1, 75);
-        engine.process_event(GameEvent::Price(100));
+        engine.process_action(GameAction::SetPrice(100));
         // ask filled @100
         assert_cash(&engine, p, 120);
         assert_shares(&engine, p, 1, 30);
@@ -302,7 +306,7 @@ mod tests {
         let invalid_player = PlayerId(uuid::Uuid::new_v4());
         let mut engine = GameState::init(vec![valid_player], 100);
 
-        let effects = engine.process_event(GameEvent::Bid {
+        let effects = engine.process_action(GameAction::Bid {
             player_id: invalid_player,
             bid_value: 50,
         });
@@ -323,7 +327,7 @@ mod tests {
         let mut engine = GameState::init(vec![p], 100);
 
         // No shares owned, ask should be rejected
-        let effects = engine.process_event(GameEvent::Ask {
+        let effects = engine.process_action(GameAction::Ask {
             player_id: p,
             ask_value: 50,
         });
@@ -344,7 +348,7 @@ mod tests {
         let p2 = PlayerId(uuid::Uuid::new_v4());
         let mut engine = GameState::init(vec![p1, p2], 100);
 
-        let effects = engine.process_event(GameEvent::Price(50));
+        let effects = engine.process_action(GameAction::SetPrice(50));
 
         // Should notify both players of the price
         assert_eq!(effects.len(), 2);
@@ -353,7 +357,7 @@ mod tests {
             .filter_map(|e| match e {
                 GameEffect::Notify {
                     player_id,
-                    event: GameEvent::Price(50),
+                    event: GameEvent::PriceChanged(50),
                 } => Some(*player_id),
                 _ => None,
             })
@@ -367,11 +371,11 @@ mod tests {
         let p = PlayerId(uuid::Uuid::new_v4());
         let mut engine = GameState::init(vec![p], 100);
 
-        engine.process_event(GameEvent::Bid {
+        engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 40,
         });
-        let effects = engine.process_event(GameEvent::Price(30));
+        let effects = engine.process_action(GameAction::SetPrice(30));
 
         // Should have price notification + bid resolved notification
         assert_eq!(effects.len(), 2);
@@ -380,7 +384,7 @@ mod tests {
             matches!(
                 e,
                 GameEffect::Notify {
-                    event: GameEvent::Price(30),
+                    event: GameEvent::PriceChanged(30),
                     ..
                 }
             )
@@ -405,21 +409,21 @@ mod tests {
         let mut engine = GameState::init(vec![p], 100);
 
         // Buy a share first
-        engine.process_event(GameEvent::Bid {
+        engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 50,
         });
-        engine.process_event(GameEvent::Price(50));
+        engine.process_action(GameAction::SetPrice(50));
         assert_shares(&engine, p, 1, 50);
 
         // Place an ask
-        engine.process_event(GameEvent::Ask {
+        engine.process_action(GameAction::Ask {
             player_id: p,
             ask_value: 60,
         });
 
         // Price goes up, ask should be resolved
-        let effects = engine.process_event(GameEvent::Price(70));
+        let effects = engine.process_action(GameAction::SetPrice(70));
 
         let has_ask_resolved = effects.iter().any(|e| {
             matches!(

@@ -1,17 +1,16 @@
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct PlayerId(pub uuid::Uuid);
+use crate::PlayerId;
 
 #[derive(Clone)]
 pub struct GameState {
     current_price: i32,
     players: Vec<PlayerId>,
 
-    // Cash balance transactions
-    liquid_transactions: Vec<(PlayerId, i32)>,
-    open_bids: Vec<(PlayerId, i32)>,
+    // (player_id, amount)
+    cash_transactions: Vec<(PlayerId, i32)>,
+    // (player_id, share_value)
+    share_transactions: Vec<(PlayerId, i32)>,
 
-    // Prices at which a share was bought/sold
-    owned_shares: Vec<(PlayerId, i32)>,
+    open_bids: Vec<(PlayerId, i32)>,
     open_asks: Vec<(PlayerId, i32)>,
 }
 
@@ -57,9 +56,9 @@ impl GameState {
         starting_balance: i32,
     ) -> Self {
         Self {
-            liquid_transactions: players.clone().into_iter().map(|pid| (pid, starting_balance)).collect(),
+            cash_transactions: players.clone().into_iter().map(|pid| (pid, starting_balance)).collect(),
             players,
-            owned_shares: Vec::new(),
+            share_transactions: Vec::new(),
             open_bids: Vec::new(),
             open_asks: Vec::new(),
             current_price: 0,
@@ -100,8 +99,8 @@ impl GameState {
         self.open_bids
             .extract_if(.., |&mut (_, v)| v >= self.current_price)
             .map(|(player_id, bid_value)| {
-                self.owned_shares.push((player_id, self.current_price));
-                self.liquid_transactions.push((player_id, bid_value - self.current_price));
+                self.share_transactions.push((player_id, self.current_price));
+                self.cash_transactions.push((player_id, bid_value - self.current_price));
                 (player_id, bid_value)
             })
             .collect()
@@ -111,7 +110,7 @@ impl GameState {
         &self,
         player_id: PlayerId,
     ) -> i32 {
-        self.liquid_transactions
+        self.cash_transactions
             .iter()
             .filter(|(pid, _)| *pid == player_id)
             .map(|(_, balance)| balance)
@@ -130,7 +129,7 @@ impl GameState {
             }];
         }
 
-        self.liquid_transactions.push((player_id, -bid_value));
+        self.cash_transactions.push((player_id, -bid_value));
         self.open_bids.push((player_id, bid_value));
 
         self.players
@@ -147,7 +146,7 @@ impl GameState {
         player_id: PlayerId,
         ask_value: i32,
     ) -> Vec<GameEffect> {
-        let owned_count = self.owned_shares.iter().filter(|(pid, _)| *pid == player_id).count();
+        let owned_count = self.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
         let asking_count = self.open_asks.iter().filter(|(pid, _)| *pid == player_id).count();
 
         if owned_count <= asking_count {
@@ -173,10 +172,10 @@ impl GameState {
             .extract_if(.., |&mut (_, v)| v <= self.current_price)
             .map(|(player_id, ask_value)| {
                 // Ask is <= price, so sell at price
-                if let Some(pos) = self.owned_shares.iter().position(|(pid, _)| *pid == player_id) {
-                    self.owned_shares.remove(pos);
+                if let Some(pos) = self.share_transactions.iter().position(|(pid, _)| *pid == player_id) {
+                    self.share_transactions.remove(pos);
                 }
-                self.liquid_transactions.push((player_id, self.current_price));
+                self.cash_transactions.push((player_id, self.current_price));
                 (player_id, ask_value)
             })
             .collect()
@@ -208,7 +207,7 @@ mod tests {
         want_total: i32,
     ) {
         let got_balance = state
-            .owned_shares
+            .share_transactions
             .iter()
             .filter(|(pid, _)| *pid == player_id)
             .map(|(_, balance)| balance)
@@ -219,7 +218,7 @@ mod tests {
             player_id, want_total, got_balance
         );
 
-        let got_count = state.owned_shares.iter().filter(|(pid, _)| *pid == player_id).count();
+        let got_count = state.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
 
         assert_eq!(
             got_count, want_count,

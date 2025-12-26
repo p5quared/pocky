@@ -1,4 +1,4 @@
-use crate::PlayerId;
+use super::PlayerId;
 
 #[derive(Clone)]
 pub struct GameState {

@@ -6,3 +6,6 @@ impl PlayerId {
         Self(uuid::Uuid::new_v4())
     }
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct GameId(pub uuid::Uuid);

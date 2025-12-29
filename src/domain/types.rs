@@ -7,5 +7,5 @@ impl PlayerId {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct GameId(pub uuid::Uuid);

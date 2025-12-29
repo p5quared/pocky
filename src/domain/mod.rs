@@ -1,5 +1,8 @@
 mod game;
-mod types;
+pub mod ports;
+pub mod services;
+pub(crate) mod types;
 
 pub use game::{GameAction, GameEffect, GameEvent, GameState};
-pub use types::PlayerId;
+pub use services as use_cases;
+pub use types::{GameId, PlayerId};

@@ -166,6 +166,13 @@ where
     N: MatchmakingEventNotifier,
     R: MatchmakingQueueRepository,
 {
+    pub fn new(
+        notifier: N,
+        repository: R,
+    ) -> Self {
+        Self { notifier, repository }
+    }
+
     pub async fn join_queue(
         &self,
         player_id: PlayerId,

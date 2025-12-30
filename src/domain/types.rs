@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct PlayerId(pub uuid::Uuid);
 
 impl PlayerId {
@@ -7,5 +9,5 @@ impl PlayerId {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize)]
 pub struct GameId(pub uuid::Uuid);

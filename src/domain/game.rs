@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use super::PlayerId;
 
 #[derive(Clone)]
@@ -21,7 +23,7 @@ pub enum GameAction {
     Ask { player_id: PlayerId, ask_value: i32 },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize)]
 pub enum GameEvent {
     PriceChanged(i32),
     BidPlaced { player_id: PlayerId, bid_value: i32 },
@@ -240,7 +242,7 @@ mod tests {
             .map(|(_, value)| *value);
 
         let got_bid_count = player_bids.clone().count();
-        let got_total_value = player_bids.clone().sum();
+        let got_total_value: i32 = player_bids.clone().sum();
 
         assert_eq!(
             want_num_bids, got_bid_count,
@@ -267,7 +269,7 @@ mod tests {
             .filter(|(pid, _)| *pid == player_id)
             .map(|(_, value)| *value);
         let got_ask_count = player_asks.clone().count();
-        let got_total_value = player_asks.clone().sum();
+        let got_total_value: i32 = player_asks.clone().sum();
         assert_eq!(
             want_num_asks, got_ask_count,
             "Expected {} open asks for player {:?}, but got {}",

@@ -9,12 +9,12 @@ use crate::domain::ports::{
 use super::ports::{AsyncTimer, GameEventNotifier, GameNotification, GameRepository, GameServiceError};
 use super::{GameAction, GameEffect, PlayerId, types::GameId};
 
-pub struct PlaceBidHandler<N, R> {
+pub struct GameService<N, R> {
     notifier: N,
     repository: R,
 }
 
-impl<N, R> PlaceBidHandler<N, R>
+impl<N, R> GameService<N, R>
 where
     N: GameEventNotifier,
     R: GameRepository,
@@ -26,7 +26,7 @@ where
         Self { notifier, repository }
     }
 
-    pub async fn execute(
+    pub async fn place_bid(
         &mut self,
         game_id: GameId,
         player_id: PlayerId,
@@ -43,40 +43,7 @@ where
         Ok(())
     }
 
-    async fn process_effects(
-        &mut self,
-        effects: Vec<GameEffect>,
-    ) {
-        for effect in effects {
-            match effect {
-                GameEffect::Notify { player_id, event } => {
-                    self.notifier
-                        .notify_player(player_id, GameNotification::GameEvent(event))
-                        .await;
-                }
-            }
-        }
-    }
-}
-
-pub struct PlaceAskHandler<N, R> {
-    notifier: N,
-    repository: R,
-}
-
-impl<N, R> PlaceAskHandler<N, R>
-where
-    N: GameEventNotifier,
-    R: GameRepository,
-{
-    pub fn new(
-        notifier: N,
-        repository: R,
-    ) -> Self {
-        Self { notifier, repository }
-    }
-
-    pub async fn execute(
+    pub async fn place_ask(
         &mut self,
         game_id: GameId,
         player_id: PlayerId,

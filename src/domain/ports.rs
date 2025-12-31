@@ -9,7 +9,7 @@ pub enum GameServiceError {
     GameNotFound(GameId),
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub enum GameNotification {
     GameEvent(GameEvent),
 }
@@ -18,7 +18,7 @@ pub enum MatchmakingServiceError {
     Foo, // TODO: Enumerate errors
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub enum MatchmakingNotification {
     PlayerJoinedQueue(PlayerId),
     PlayerLeftQueue(PlayerId),
@@ -27,7 +27,7 @@ pub enum MatchmakingNotification {
 
 pub trait GameEventNotifier {
     fn notify_player(
-        &mut self,
+        &self,
         player_id: PlayerId,
         notification: GameNotification,
     ) -> impl Future<Output = ()> + Send;

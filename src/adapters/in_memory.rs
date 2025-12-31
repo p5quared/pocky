@@ -17,7 +17,17 @@ pub struct InMemory {
 
 impl GameEventNotifier for InMemory {
     async fn notify_player(
-        &mut self,
+        &self,
+        player_id: PlayerId,
+        notification: GameNotification,
+    ) {
+        self.game_events.write().unwrap().push((player_id, notification));
+    }
+}
+
+impl GameEventNotifier for &InMemory {
+    async fn notify_player(
+        &self,
         player_id: PlayerId,
         notification: GameNotification,
     ) {
@@ -34,6 +44,14 @@ impl InMemory {
             matchmaking_events: RwLock::new(Vec::new()),
         }
     }
+
+    pub fn get_game_events(&self) -> Vec<(PlayerId, GameNotification)> {
+        self.game_events.read().unwrap().clone()
+    }
+
+    pub fn get_matchmaking_events(&self) -> Vec<(PlayerId, MatchmakingNotification)> {
+        self.matchmaking_events.read().unwrap().clone()
+    }
 }
 
 impl Default for InMemory {
@@ -43,6 +61,23 @@ impl Default for InMemory {
 }
 
 impl GameRepository for InMemory {
+    async fn load_game(
+        &self,
+        game_id: GameId,
+    ) -> Option<GameState> {
+        self.games.read().unwrap().get(&game_id).cloned()
+    }
+
+    async fn save_game(
+        &self,
+        game_id: GameId,
+        game_state: &GameState,
+    ) {
+        self.games.write().unwrap().insert(game_id, game_state.clone());
+    }
+}
+
+impl GameRepository for &InMemory {
     async fn load_game(
         &self,
         game_id: GameId,
@@ -72,6 +107,19 @@ impl MatchmakingQueueRepository for InMemory {
     }
 }
 
+impl MatchmakingQueueRepository for &InMemory {
+    async fn load_queue(&self) -> Vec<PlayerId> {
+        self.matchmaking_queue.read().unwrap().clone()
+    }
+
+    async fn save_queue(
+        &self,
+        queue: &Vec<PlayerId>,
+    ) {
+        *self.matchmaking_queue.write().unwrap() = queue.clone();
+    }
+}
+
 impl MatchmakingEventNotifier for InMemory {
     async fn notify_player(
         &self,
@@ -82,7 +130,26 @@ impl MatchmakingEventNotifier for InMemory {
     }
 }
 
+impl MatchmakingEventNotifier for &InMemory {
+    async fn notify_player(
+        &self,
+        player_id: PlayerId,
+        notification: MatchmakingNotification,
+    ) {
+        self.matchmaking_events.write().unwrap().push((player_id, notification));
+    }
+}
+
 impl AsyncTimer for InMemory {
+    async fn sleep(
+        &self,
+        _duration: Duration,
+    ) {
+        // No-op for testing - instant return
+    }
+}
+
+impl AsyncTimer for &InMemory {
     async fn sleep(
         &self,
         _duration: Duration,

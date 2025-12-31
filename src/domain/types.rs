@@ -11,3 +11,9 @@ impl PlayerId {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize)]
 pub struct GameId(pub uuid::Uuid);
+
+impl GameId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}

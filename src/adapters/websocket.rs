@@ -78,7 +78,7 @@ impl Default for WebSocketAdapter {
 
 impl GameEventNotifier for WebSocketAdapter {
     async fn notify_player(
-        &mut self,
+        &self,
         player_id: PlayerId,
         notification: GameNotification,
     ) {

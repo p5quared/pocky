@@ -9,8 +9,8 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
 use crate::domain::ports::{
-    GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
-    LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
+    GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification, LobbyRepository,
+    MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
 use crate::domain::services::{GameService, LobbyService, MatchmakingService};
 use crate::domain::{GameId, LobbyId, PlayerId};
@@ -149,33 +149,33 @@ async fn handle_messages<GN, GR, MN, MR, LN, LR>(
     LR: LobbyRepository + Send + Sync,
 {
     while let Some(Ok(message)) = receiver.next().await {
-        if let Message::Text(text) = message {
-            if let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text) {
-                match incoming {
-                    IncomingMessage::PlaceBid { game_id, value } => {
-                        let _ = state.game_service.lock().await.place_bid(game_id, player_id, value).await;
-                    }
-                    IncomingMessage::PlaceAsk { game_id, value } => {
-                        let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
-                    }
-                    IncomingMessage::JoinQueue => {
-                        let _ = state.matchmaking_service.join_queue(player_id).await;
-                    }
-                    IncomingMessage::LeaveQueue => {
-                        let _ = state.matchmaking_service.leave_queue(player_id).await;
-                    }
-                    IncomingMessage::JoinLobby { lobby_id } => {
-                        let _ = state.lobby_service.player_arrived(lobby_id, player_id).await;
-                    }
-                    IncomingMessage::LeaveLobby { lobby_id } => {
-                        let _ = state.lobby_service.player_disconnected(lobby_id, player_id).await;
-                    }
-                    IncomingMessage::Ready { lobby_id } => {
-                        let _ = state.lobby_service.player_ready(lobby_id, player_id).await;
-                    }
-                    IncomingMessage::Unready { lobby_id } => {
-                        let _ = state.lobby_service.player_unready(lobby_id, player_id).await;
-                    }
+        if let Message::Text(text) = message
+            && let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text)
+        {
+            match incoming {
+                IncomingMessage::PlaceBid { game_id, value } => {
+                    let _ = state.game_service.lock().await.place_bid(game_id, player_id, value).await;
+                }
+                IncomingMessage::PlaceAsk { game_id, value } => {
+                    let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
+                }
+                IncomingMessage::JoinQueue => {
+                    let _ = state.matchmaking_service.join_queue(player_id).await;
+                }
+                IncomingMessage::LeaveQueue => {
+                    let _ = state.matchmaking_service.leave_queue(player_id).await;
+                }
+                IncomingMessage::JoinLobby { lobby_id } => {
+                    let _ = state.lobby_service.player_arrived(lobby_id, player_id).await;
+                }
+                IncomingMessage::LeaveLobby { lobby_id } => {
+                    let _ = state.lobby_service.player_disconnected(lobby_id, player_id).await;
+                }
+                IncomingMessage::Ready { lobby_id } => {
+                    let _ = state.lobby_service.player_ready(lobby_id, player_id).await;
+                }
+                IncomingMessage::Unready { lobby_id } => {
+                    let _ = state.lobby_service.player_unready(lobby_id, player_id).await;
                 }
             }
         }

@@ -21,6 +21,7 @@ pub enum GameAction {
     SetPrice(i32),
     Bid { player_id: PlayerId, bid_value: i32 },
     Ask { player_id: PlayerId, ask_value: i32 },
+    End,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -32,6 +33,7 @@ pub enum GameEvent {
     AskResolved { player_id: PlayerId, ask_value: i32 },
     BidRejected { player_id: PlayerId, bid_value: i32 },
     AskRejected { player_id: PlayerId, ask_value: i32 },
+    GameEnded,
 }
 
 #[derive(Clone, Copy)]
@@ -48,6 +50,7 @@ impl GameState {
             GameAction::SetPrice(price) => self.handle_price(price),
             GameAction::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
             GameAction::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
+            GameAction::End => self.handle_game_end(),
         }
     }
 }
@@ -65,6 +68,16 @@ impl GameState {
             open_asks: Vec::new(),
             current_price: 0,
         }
+    }
+
+    fn handle_game_end(&self) -> Vec<GameEffect> {
+        self.players
+            .iter()
+            .map(|&player_id| GameEffect::Notify {
+                player_id,
+                event: GameEvent::GameEnded,
+            })
+            .collect()
     }
 
     fn handle_price(
@@ -521,6 +534,30 @@ mod tests {
                             ask_value: 60,
                         },
                 } if *asker == p1 => Some(*player_id),
+                _ => None,
+            })
+            .collect();
+        assert!(notified_players.contains(&p1));
+        assert!(notified_players.contains(&p2));
+    }
+
+    #[test]
+    fn test_game_end_notifications() {
+        let p1 = PlayerId(uuid::Uuid::new_v4());
+        let p2 = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = GameState::init(vec![p1, p2], 100);
+
+        let effects = engine.process_action(GameAction::End);
+
+        // Should notify both players of game end
+        assert_eq!(effects.len(), 2);
+        let notified_players: Vec<_> = effects
+            .iter()
+            .filter_map(|e| match e {
+                GameEffect::Notify {
+                    player_id,
+                    event: GameEvent::GameEnded,
+                } => Some(*player_id),
                 _ => None,
             })
             .collect();

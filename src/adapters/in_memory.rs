@@ -3,8 +3,8 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::domain::ports::{
-    AsyncTimer, GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
-    LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
+    AsyncTimer, GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification, LobbyRepository,
+    MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
 use crate::domain::{GameId, GameState, LobbyId, LobbyState, PlayerId};
 
@@ -169,11 +169,18 @@ impl AsyncTimer for &InMemory {
 }
 
 impl LobbyRepository for InMemory {
-    async fn load_lobby(&self, lobby_id: LobbyId) -> Option<LobbyState> {
+    async fn load_lobby(
+        &self,
+        lobby_id: LobbyId,
+    ) -> Option<LobbyState> {
         self.lobbies.read().unwrap().get(&lobby_id).cloned()
     }
 
-    async fn save_lobby(&self, lobby_id: LobbyId, lobby_state: &LobbyState) {
+    async fn save_lobby(
+        &self,
+        lobby_id: LobbyId,
+        lobby_state: &LobbyState,
+    ) {
         self.lobbies.write().unwrap().insert(lobby_id, lobby_state.clone());
         // Update player-to-lobby mapping
         let mut map = self.player_lobby_map.write().unwrap();
@@ -182,7 +189,10 @@ impl LobbyRepository for InMemory {
         }
     }
 
-    async fn delete_lobby(&self, lobby_id: LobbyId) {
+    async fn delete_lobby(
+        &self,
+        lobby_id: LobbyId,
+    ) {
         if let Some(lobby) = self.lobbies.write().unwrap().remove(&lobby_id) {
             let mut map = self.player_lobby_map.write().unwrap();
             for player in &lobby.arrived_players {
@@ -191,17 +201,27 @@ impl LobbyRepository for InMemory {
         }
     }
 
-    async fn find_lobby_by_player(&self, player_id: PlayerId) -> Option<LobbyId> {
+    async fn find_lobby_by_player(
+        &self,
+        player_id: PlayerId,
+    ) -> Option<LobbyId> {
         self.player_lobby_map.read().unwrap().get(&player_id).copied()
     }
 }
 
 impl LobbyRepository for &InMemory {
-    async fn load_lobby(&self, lobby_id: LobbyId) -> Option<LobbyState> {
+    async fn load_lobby(
+        &self,
+        lobby_id: LobbyId,
+    ) -> Option<LobbyState> {
         self.lobbies.read().unwrap().get(&lobby_id).cloned()
     }
 
-    async fn save_lobby(&self, lobby_id: LobbyId, lobby_state: &LobbyState) {
+    async fn save_lobby(
+        &self,
+        lobby_id: LobbyId,
+        lobby_state: &LobbyState,
+    ) {
         self.lobbies.write().unwrap().insert(lobby_id, lobby_state.clone());
         // Update player-to-lobby mapping
         let mut map = self.player_lobby_map.write().unwrap();
@@ -210,7 +230,10 @@ impl LobbyRepository for &InMemory {
         }
     }
 
-    async fn delete_lobby(&self, lobby_id: LobbyId) {
+    async fn delete_lobby(
+        &self,
+        lobby_id: LobbyId,
+    ) {
         if let Some(lobby) = self.lobbies.write().unwrap().remove(&lobby_id) {
             let mut map = self.player_lobby_map.write().unwrap();
             for player in &lobby.arrived_players {
@@ -219,19 +242,30 @@ impl LobbyRepository for &InMemory {
         }
     }
 
-    async fn find_lobby_by_player(&self, player_id: PlayerId) -> Option<LobbyId> {
+    async fn find_lobby_by_player(
+        &self,
+        player_id: PlayerId,
+    ) -> Option<LobbyId> {
         self.player_lobby_map.read().unwrap().get(&player_id).copied()
     }
 }
 
 impl LobbyEventNotifier for InMemory {
-    async fn notify_player(&self, player_id: PlayerId, notification: LobbyNotification) {
+    async fn notify_player(
+        &self,
+        player_id: PlayerId,
+        notification: LobbyNotification,
+    ) {
         self.lobby_events.write().unwrap().push((player_id, notification));
     }
 }
 
 impl LobbyEventNotifier for &InMemory {
-    async fn notify_player(&self, player_id: PlayerId, notification: LobbyNotification) {
+    async fn notify_player(
+        &self,
+        player_id: PlayerId,
+        notification: LobbyNotification,
+    ) {
         self.lobby_events.write().unwrap().push((player_id, notification));
     }
 }

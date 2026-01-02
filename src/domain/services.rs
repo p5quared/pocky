@@ -28,6 +28,14 @@ where
         Self { notifier, repository }
     }
 
+    /// Place a buy order for shares at the specified price.
+    ///
+    /// The bid will be held as an open order until the market price reaches or exceeds
+    /// the bid value, at which point it will be automatically resolved. Notifies all
+    /// players in the game of the bid placement.
+    ///
+    /// # Errors
+    /// Returns `GameNotFound` if the game does not exist.
     pub async fn place_bid(
         &mut self,
         game_id: GameId,
@@ -45,6 +53,14 @@ where
         Ok(())
     }
 
+    /// Place a sell order for shares at the specified price.
+    ///
+    /// The ask will be held as an open order until the market price reaches or falls below
+    /// the ask value, at which point it will be automatically resolved. Notifies all players
+    /// in the game of the ask placement.
+    ///
+    /// # Errors
+    /// Returns `GameNotFound` if the game does not exist.
     pub async fn place_ask(
         &mut self,
         game_id: GameId,
@@ -62,6 +78,12 @@ where
         Ok(())
     }
 
+    /// Initialize a new trading game with the specified players and starting cash balance.
+    ///
+    /// Creates a new game state with all players starting at the given balance and no
+    /// open orders or share ownership. The game is immediately persisted to the repository.
+    ///
+    /// Returns the unique identifier for the newly created game.
     pub async fn new_game(
         &mut self,
         players: Vec<PlayerId>,
@@ -119,6 +141,17 @@ where
         }
     }
 
+    /// Run the price ticker loop, continuously updating the market price at regular intervals.
+    ///
+    /// This is a long-running background task that:
+    /// - Updates the price by a random delta each tick
+    /// - Automatically resolves any bids/asks that match the new price
+    /// - Notifies all players of price changes and order resolutions
+    ///
+    /// The loop runs indefinitely until an error occurs or the game is not found.
+    ///
+    /// # Errors
+    /// Returns `GameNotFound` if the game is deleted during execution.
     pub async fn run(
         &mut self,
         game_id: GameId,
@@ -186,6 +219,10 @@ where
         Self { notifier, repository }
     }
 
+    /// Add a player to the matchmaking queue.
+    ///
+    /// The player is appended to the queue and all players currently in the queue
+    /// (including the new player) are notified that a new player has joined.
     pub async fn join_queue(
         &self,
         player_id: PlayerId,
@@ -203,6 +240,10 @@ where
         Ok(())
     }
 
+    /// Remove a player from the matchmaking queue.
+    ///
+    /// The player is removed and all remaining players in the queue are notified
+    /// that the player has left.
     pub async fn leave_queue(
         &self,
         player_id: PlayerId,
@@ -220,6 +261,11 @@ where
         Ok(())
     }
 
+    /// Notify players that they have been matched and assigned to a lobby.
+    ///
+    /// Removes the matched players from the queue, notifies remaining players
+    /// that the matched players have left, and notifies the matched players
+    /// that they should join the specified lobby.
     pub async fn game_found(
         &self,
         matched_players: Vec<PlayerId>,
@@ -267,6 +313,12 @@ where
         Self { notifier, repository }
     }
 
+    /// Create a new lobby for the specified players.
+    ///
+    /// The lobby starts in the `WaitingForReady` phase with no players arrived yet.
+    /// Players must explicitly join the lobby to be marked as arrived.
+    ///
+    /// Returns the unique identifier for the newly created lobby.
     pub async fn create_lobby(
         &self,
         players: Vec<PlayerId>,
@@ -277,6 +329,13 @@ where
         Ok(lobby_id)
     }
 
+    /// Mark a player as having joined the lobby.
+    ///
+    /// Broadcasts a `PlayerArrived` event to all players in the lobby and sends
+    /// the current lobby state (player list, ready status, phase) to the arriving player.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn player_arrived(
         &self,
         lobby_id: LobbyId,
@@ -296,6 +355,13 @@ where
         Ok(())
     }
 
+    /// Mark a player as ready to start the game.
+    ///
+    /// If all arrived players become ready, automatically starts a 10-second countdown.
+    /// Broadcasts `PlayerReady` and potentially `CountdownStarted` events to all players.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn player_ready(
         &self,
         lobby_id: LobbyId,
@@ -312,6 +378,14 @@ where
         Ok(())
     }
 
+    /// Mark a player as no longer ready to start the game.
+    ///
+    /// If a countdown is in progress, it will be cancelled and the lobby returns
+    /// to the `WaitingForReady` phase. Broadcasts `PlayerUnready` and potentially
+    /// `CountdownCancelled` events to all players.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn player_unready(
         &self,
         lobby_id: LobbyId,
@@ -328,6 +402,14 @@ where
         Ok(())
     }
 
+    /// Handle a player disconnecting from the lobby.
+    ///
+    /// Removes the player from the lobby. If all players disconnect, the lobby is cancelled.
+    /// If a countdown is in progress, it continues with the remaining players.
+    /// Broadcasts `PlayerDisconnected` and potentially `LobbyCancelled` events.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn player_disconnected(
         &self,
         lobby_id: LobbyId,
@@ -344,6 +426,17 @@ where
         Ok(())
     }
 
+    /// Process a single tick of the countdown timer.
+    ///
+    /// Decrements the countdown by 1 second and broadcasts a `CountdownTick` event.
+    /// When the countdown reaches 0, returns `Some(GameId)` to signal that the game
+    /// should be created. The caller is responsible for creating the game and calling
+    /// `finalize_game_start`.
+    ///
+    /// Returns `None` if the countdown is still in progress.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn countdown_tick(
         &self,
         lobby_id: LobbyId,
@@ -366,6 +459,15 @@ where
         Ok(game_id)
     }
 
+    /// Finalize the transition from lobby to game.
+    ///
+    /// Broadcasts a `GameStarting` event to all players, deletes the lobby from
+    /// the repository, and returns the list of players who should be in the game.
+    ///
+    /// This should be called after the game has been created via `GameService::new_game`.
+    ///
+    /// # Errors
+    /// Returns `LobbyNotFound` if the lobby does not exist.
     pub async fn finalize_game_start(
         &self,
         lobby_id: LobbyId,
@@ -415,6 +517,10 @@ where
         }
     }
 
+    /// Find the lobby that a player is currently in, if any.
+    ///
+    /// This is useful for handling player disconnects, where you need to determine
+    /// which lobby to notify about the disconnection.
     pub async fn find_lobby_by_player(
         &self,
         player_id: PlayerId,
@@ -422,7 +528,10 @@ where
         self.repository.find_lobby_by_player(player_id).await
     }
 
-    /// Check if countdown effects are present and return the delay if scheduling is needed
+    /// Check if countdown effects are present and return the delay if scheduling is needed.
+    ///
+    /// This is a utility method for external timer schedulers to determine if they
+    /// need to schedule a countdown tick callback.
     pub fn should_schedule_countdown(effects: &[LobbyEffect]) -> Option<u32> {
         effects.iter().find_map(|e| match e {
             LobbyEffect::ScheduleCountdownTick { delay_seconds } => Some(*delay_seconds),
@@ -503,7 +612,13 @@ where
         }
     }
 
-    /// Run the matchmaking handler loop
+    /// Run the matchmaking handler loop as a background task.
+    ///
+    /// Continuously checks the matchmaking queue at regular intervals (`check_interval`).
+    /// When enough players are waiting, automatically creates a lobby and notifies the
+    /// matched players.
+    ///
+    /// This is a long-running task that should be spawned in the background (e.g., via `tokio::spawn`).
     pub async fn run(&self) {
         loop {
             self.timer.sleep(self.check_interval).await;

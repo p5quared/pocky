@@ -9,11 +9,11 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
 use crate::domain::ports::{
-    GameEventNotifier, GameNotification, GameRepository, MatchmakingEventNotifier,
-    MatchmakingNotification, MatchmakingQueueRepository,
+    GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
+    LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
-use crate::domain::services::{GameService, MatchmakingService};
-use crate::domain::{GameId, PlayerId};
+use crate::domain::services::{GameService, LobbyService, MatchmakingService};
+use crate::domain::{GameId, LobbyId, PlayerId};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
@@ -24,12 +24,17 @@ pub enum IncomingMessage {
     PlaceAsk { game_id: GameId, value: i32 },
     JoinQueue,
     LeaveQueue,
+    JoinLobby { lobby_id: LobbyId },
+    LeaveLobby { lobby_id: LobbyId },
+    Ready { lobby_id: LobbyId },
+    Unready { lobby_id: LobbyId },
 }
 
-pub struct AppState<GN, GR, MN, MR> {
+pub struct AppState<GN, GR, MN, MR, LN, LR> {
     pub adapter: Arc<WebSocketAdapter>,
     pub game_service: Arc<TokioMutex<GameService<GN, GR>>>,
     pub matchmaking_service: Arc<MatchmakingService<MN, MR>>,
+    pub lobby_service: Arc<LobbyService<LN, LR>>,
 }
 
 pub struct WebSocketAdapter {
@@ -98,15 +103,28 @@ impl MatchmakingEventNotifier for WebSocketAdapter {
     }
 }
 
-pub async fn handle_connection<GN, GR, MN, MR>(
+impl LobbyEventNotifier for WebSocketAdapter {
+    async fn notify_player(
+        &self,
+        player_id: PlayerId,
+        notification: LobbyNotification,
+    ) {
+        let message = serde_json::to_string(&notification).unwrap_or_default();
+        self.send_to_player(player_id, &message).await;
+    }
+}
+
+pub async fn handle_connection<GN, GR, MN, MR, LN, LR>(
     ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState<GN, GR, MN, MR>>>,
+    State(state): State<Arc<AppState<GN, GR, MN, MR, LN, LR>>>,
 ) -> impl IntoResponse
 where
     GN: GameEventNotifier + Send + 'static,
     GR: GameRepository + Send + 'static,
     MN: MatchmakingEventNotifier + Send + Sync + 'static,
     MR: MatchmakingQueueRepository + Send + Sync + 'static,
+    LN: LobbyEventNotifier + Send + Sync + 'static,
+    LR: LobbyRepository + Send + Sync + 'static,
 {
     ws.on_upgrade(move |socket| async move {
         let player_id = PlayerId::new();
@@ -118,15 +136,17 @@ where
     })
 }
 
-async fn handle_messages<GN, GR, MN, MR>(
+async fn handle_messages<GN, GR, MN, MR, LN, LR>(
     player_id: PlayerId,
     mut receiver: SplitStream<WebSocket>,
-    state: Arc<AppState<GN, GR, MN, MR>>,
+    state: Arc<AppState<GN, GR, MN, MR, LN, LR>>,
 ) where
     GN: GameEventNotifier + Send,
     GR: GameRepository + Send,
     MN: MatchmakingEventNotifier + Send + Sync,
     MR: MatchmakingQueueRepository + Send + Sync,
+    LN: LobbyEventNotifier + Send + Sync,
+    LR: LobbyRepository + Send + Sync,
 {
     while let Some(Ok(message)) = receiver.next().await {
         if let Message::Text(text) = message {
@@ -144,9 +164,26 @@ async fn handle_messages<GN, GR, MN, MR>(
                     IncomingMessage::LeaveQueue => {
                         let _ = state.matchmaking_service.leave_queue(player_id).await;
                     }
+                    IncomingMessage::JoinLobby { lobby_id } => {
+                        let _ = state.lobby_service.player_arrived(lobby_id, player_id).await;
+                    }
+                    IncomingMessage::LeaveLobby { lobby_id } => {
+                        let _ = state.lobby_service.player_disconnected(lobby_id, player_id).await;
+                    }
+                    IncomingMessage::Ready { lobby_id } => {
+                        let _ = state.lobby_service.player_ready(lobby_id, player_id).await;
+                    }
+                    IncomingMessage::Unready { lobby_id } => {
+                        let _ = state.lobby_service.player_unready(lobby_id, player_id).await;
+                    }
                 }
             }
         }
+    }
+
+    // Handle disconnect - check if player was in a lobby
+    if let Some(lobby_id) = state.lobby_service.find_lobby_by_player(player_id).await {
+        let _ = state.lobby_service.player_disconnected(lobby_id, player_id).await;
     }
 
     state.adapter.unregister_player(player_id).await;

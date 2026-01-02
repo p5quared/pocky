@@ -3,16 +3,19 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::domain::ports::{
-    AsyncTimer, GameEventNotifier, GameNotification, GameRepository, MatchmakingEventNotifier, MatchmakingNotification,
-    MatchmakingQueueRepository,
+    AsyncTimer, GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
+    LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
-use crate::domain::{GameId, GameState, PlayerId};
+use crate::domain::{GameId, GameState, LobbyId, LobbyState, PlayerId};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,
     game_events: RwLock<Vec<(PlayerId, GameNotification)>>,
     matchmaking_queue: RwLock<Vec<PlayerId>>,
     matchmaking_events: RwLock<Vec<(PlayerId, MatchmakingNotification)>>,
+    lobbies: RwLock<HashMap<LobbyId, LobbyState>>,
+    lobby_events: RwLock<Vec<(PlayerId, LobbyNotification)>>,
+    player_lobby_map: RwLock<HashMap<PlayerId, LobbyId>>,
 }
 
 impl GameEventNotifier for InMemory {
@@ -42,6 +45,9 @@ impl InMemory {
             game_events: RwLock::new(Vec::new()),
             matchmaking_queue: RwLock::new(Vec::new()),
             matchmaking_events: RwLock::new(Vec::new()),
+            lobbies: RwLock::new(HashMap::new()),
+            lobby_events: RwLock::new(Vec::new()),
+            player_lobby_map: RwLock::new(HashMap::new()),
         }
     }
 
@@ -51,6 +57,10 @@ impl InMemory {
 
     pub fn get_matchmaking_events(&self) -> Vec<(PlayerId, MatchmakingNotification)> {
         self.matchmaking_events.read().unwrap().clone()
+    }
+
+    pub fn get_lobby_events(&self) -> Vec<(PlayerId, LobbyNotification)> {
+        self.lobby_events.read().unwrap().clone()
     }
 }
 
@@ -155,5 +165,73 @@ impl AsyncTimer for &InMemory {
         _duration: Duration,
     ) {
         // No-op for testing - instant return
+    }
+}
+
+impl LobbyRepository for InMemory {
+    async fn load_lobby(&self, lobby_id: LobbyId) -> Option<LobbyState> {
+        self.lobbies.read().unwrap().get(&lobby_id).cloned()
+    }
+
+    async fn save_lobby(&self, lobby_id: LobbyId, lobby_state: &LobbyState) {
+        self.lobbies.write().unwrap().insert(lobby_id, lobby_state.clone());
+        // Update player-to-lobby mapping
+        let mut map = self.player_lobby_map.write().unwrap();
+        for player in &lobby_state.arrived_players {
+            map.insert(*player, lobby_id);
+        }
+    }
+
+    async fn delete_lobby(&self, lobby_id: LobbyId) {
+        if let Some(lobby) = self.lobbies.write().unwrap().remove(&lobby_id) {
+            let mut map = self.player_lobby_map.write().unwrap();
+            for player in &lobby.arrived_players {
+                map.remove(player);
+            }
+        }
+    }
+
+    async fn find_lobby_by_player(&self, player_id: PlayerId) -> Option<LobbyId> {
+        self.player_lobby_map.read().unwrap().get(&player_id).copied()
+    }
+}
+
+impl LobbyRepository for &InMemory {
+    async fn load_lobby(&self, lobby_id: LobbyId) -> Option<LobbyState> {
+        self.lobbies.read().unwrap().get(&lobby_id).cloned()
+    }
+
+    async fn save_lobby(&self, lobby_id: LobbyId, lobby_state: &LobbyState) {
+        self.lobbies.write().unwrap().insert(lobby_id, lobby_state.clone());
+        // Update player-to-lobby mapping
+        let mut map = self.player_lobby_map.write().unwrap();
+        for player in &lobby_state.arrived_players {
+            map.insert(*player, lobby_id);
+        }
+    }
+
+    async fn delete_lobby(&self, lobby_id: LobbyId) {
+        if let Some(lobby) = self.lobbies.write().unwrap().remove(&lobby_id) {
+            let mut map = self.player_lobby_map.write().unwrap();
+            for player in &lobby.arrived_players {
+                map.remove(player);
+            }
+        }
+    }
+
+    async fn find_lobby_by_player(&self, player_id: PlayerId) -> Option<LobbyId> {
+        self.player_lobby_map.read().unwrap().get(&player_id).copied()
+    }
+}
+
+impl LobbyEventNotifier for InMemory {
+    async fn notify_player(&self, player_id: PlayerId, notification: LobbyNotification) {
+        self.lobby_events.write().unwrap().push((player_id, notification));
+    }
+}
+
+impl LobbyEventNotifier for &InMemory {
+    async fn notify_player(&self, player_id: PlayerId, notification: LobbyNotification) {
+        self.lobby_events.write().unwrap().push((player_id, notification));
     }
 }

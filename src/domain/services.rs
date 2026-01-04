@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use rand::Rng;
-
 use crate::domain::ports::{
     LobbyEventNotifier, LobbyNotification, LobbyPlayerInfo, LobbyRepository, LobbyServiceError, MatchmakingEventNotifier,
     MatchmakingNotification, MatchmakingQueueRepository, MatchmakingServiceError,
@@ -9,7 +7,7 @@ use crate::domain::ports::{
 
 use super::ports::{AsyncTimer, GameEventNotifier, GameNotification, GameRepository, GameServiceError};
 use super::types::LobbyId;
-use super::{GameAction, GameEffect, LobbyAction, LobbyEffect, LobbyPhase, LobbyState, PlayerId, types::GameId};
+use super::{GameAction, GameConfig, GameEffect, LobbyAction, LobbyEffect, LobbyPhase, LobbyState, PlayerId, types::GameId};
 
 pub struct GameService<N, R> {
     notifier: N,
@@ -80,19 +78,78 @@ where
 
     /// Initialize a new trading game with the specified players and starting cash balance.
     ///
-    /// Creates a new game state with all players starting at the given balance and no
-    /// open orders or share ownership. The game is immediately persisted to the repository.
+    /// Creates a new game state in `Pending` phase with all players starting at the given
+    /// balance and no open orders or share ownership. The game is immediately persisted
+    /// to the repository. Call `start_game` to transition to `Running` phase.
     ///
     /// Returns the unique identifier for the newly created game.
     pub async fn new_game(
         &mut self,
         players: Vec<PlayerId>,
         starting_balance: i32,
+        config: GameConfig,
     ) -> Result<GameId, GameServiceError> {
         let game_id = GameId::new();
-        let game_state = super::GameState::init(players, starting_balance);
+        let game_state = super::GameState::new(players, starting_balance, config);
         self.repository.save_game(game_id, &game_state).await;
         Ok(game_id)
+    }
+
+    /// Start the game, transitioning from `Pending` to `Running` phase.
+    ///
+    /// This sets the initial price and notifies all players that the game has started.
+    /// Returns `Some(delay_ms)` if a price tick should be scheduled, `None` otherwise.
+    ///
+    /// # Errors
+    /// Returns `GameNotFound` if the game does not exist.
+    pub async fn start_game(
+        &mut self,
+        game_id: GameId,
+    ) -> Result<Option<u64>, GameServiceError> {
+        let Some(mut game_state) = self.repository.load_game(game_id).await else {
+            return Err(GameServiceError::GameNotFound(game_id));
+        };
+
+        let effects = game_state.process_action(GameAction::Start);
+        self.repository.save_game(game_id, &game_state).await;
+
+        let scheduled_delay = Self::extract_scheduled_tick(&effects);
+        self.process_effects(effects).await;
+
+        Ok(scheduled_delay)
+    }
+
+    /// Process a price tick, computing the next price and resolving orders.
+    ///
+    /// This updates the price using a random delta, resolves matching bids/asks,
+    /// and notifies players of changes. Returns `Some(delay_ms)` if another price
+    /// tick should be scheduled, `None` if the game has ended.
+    ///
+    /// # Errors
+    /// Returns `GameNotFound` if the game does not exist.
+    pub async fn process_price_tick(
+        &mut self,
+        game_id: GameId,
+    ) -> Result<Option<u64>, GameServiceError> {
+        let Some(mut game_state) = self.repository.load_game(game_id).await else {
+            return Err(GameServiceError::GameNotFound(game_id));
+        };
+
+        let effects = game_state.process_action(GameAction::PriceTick);
+        self.repository.save_game(game_id, &game_state).await;
+
+        let scheduled_delay = Self::extract_scheduled_tick(&effects);
+        self.process_effects(effects).await;
+
+        Ok(scheduled_delay)
+    }
+
+    /// Extract the scheduled tick delay from effects, if present.
+    pub fn extract_scheduled_tick(effects: &[GameEffect]) -> Option<u64> {
+        effects.iter().find_map(|e| match e {
+            GameEffect::SchedulePriceTick { delay_ms } => Some(*delay_ms),
+            _ => None,
+        })
     }
 
     async fn process_effects(
@@ -106,94 +163,8 @@ where
                         .notify_player(player_id, GameNotification::GameEvent(event))
                         .await;
                 }
-            }
-        }
-    }
-}
-
-pub struct PriceTickerHandler<N, R, T> {
-    notifier: N,
-    repository: R,
-    timer: T,
-    tick_interval: Duration,
-    max_price_delta: i32,
-}
-
-impl<N, R, T> PriceTickerHandler<N, R, T>
-where
-    N: GameEventNotifier,
-    R: GameRepository,
-    T: AsyncTimer,
-{
-    pub fn new(
-        notifier: N,
-        repository: R,
-        timer: T,
-        tick_interval: Duration,
-        max_price_delta: i32,
-    ) -> Self {
-        Self {
-            notifier,
-            repository,
-            timer,
-            tick_interval,
-            max_price_delta,
-        }
-    }
-
-    /// Run the price ticker loop, continuously updating the market price at regular intervals.
-    ///
-    /// This is a long-running background task that:
-    /// - Updates the price by a random delta each tick
-    /// - Automatically resolves any bids/asks that match the new price
-    /// - Notifies all players of price changes and order resolutions
-    ///
-    /// The loop runs indefinitely until an error occurs or the game is not found.
-    ///
-    /// # Errors
-    /// Returns `GameNotFound` if the game is deleted during execution.
-    pub async fn run(
-        &mut self,
-        game_id: GameId,
-        initial_price: i32,
-    ) -> Result<(), GameServiceError> {
-        let mut current_price = initial_price;
-
-        loop {
-            let Some(mut game_state) = self.repository.load_game(game_id).await else {
-                return Err(GameServiceError::GameNotFound(game_id));
-            };
-
-            let effects = game_state.process_action(GameAction::SetPrice(current_price));
-            self.process_effects(effects).await;
-
-            self.repository.save_game(game_id, &game_state).await;
-
-            self.timer.sleep(self.tick_interval).await;
-
-            current_price = self.next_price(current_price);
-        }
-    }
-
-    fn next_price(
-        &self,
-        current_price: i32,
-    ) -> i32 {
-        let mut rng = rand::thread_rng();
-        let delta = rng.gen_range(-self.max_price_delta..=self.max_price_delta);
-        (current_price + delta).max(0)
-    }
-
-    async fn process_effects(
-        &mut self,
-        effects: Vec<GameEffect>,
-    ) {
-        for effect in effects {
-            match effect {
-                GameEffect::Notify { player_id, event } => {
-                    self.notifier
-                        .notify_player(player_id, GameNotification::GameEvent(event))
-                        .await;
+                GameEffect::SchedulePriceTick { .. } => {
+                    // Handled by caller via extract_scheduled_tick
                 }
             }
         }
@@ -656,11 +627,22 @@ mod tests {
     use crate::domain::ports::{GameNotification, GameRepository, MatchmakingQueueRepository};
     use crate::domain::{GameEvent, GameState, LobbyId};
 
+    fn test_config() -> GameConfig {
+        GameConfig {
+            tick_interval_ms: 1000,
+            max_price_delta: 10,
+            starting_price: 50,
+        }
+    }
+
     fn create_test_game(
         players: Vec<PlayerId>,
         starting_balance: i32,
     ) -> GameState {
-        GameState::init(players, starting_balance)
+        let mut game = GameState::new(players, starting_balance, test_config());
+        // Start the game so it's in Running state for tests
+        game.process_action(GameAction::Start);
+        game
     }
 
     // ==================== GameService Tests ====================
@@ -720,12 +702,12 @@ mod tests {
         let game_id = GameId::new();
         let player = PlayerId::new();
         let mut game = create_test_game(vec![player], 1000);
-        // Give player some shares first by processing a price and resolved bid
+        // Give player some shares first by placing a bid and processing a price tick
         game.process_action(GameAction::Bid {
             player_id: player,
             bid_value: 50,
         });
-        game.process_action(GameAction::SetPrice(50)); // This resolves the bid, giving shares
+        game.process_action(GameAction::PriceTick); // This resolves the bid, giving shares
         adapter.save_game(game_id, &game).await;
 
         let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
@@ -837,42 +819,55 @@ mod tests {
         assert!(player2_got_lobby_created, "Player2 should receive LobbyCreated notification");
     }
 
-    // ==================== PriceTickerHandler Tests ====================
+    // ==================== GameService start_game/process_price_tick Tests ====================
 
     #[tokio::test]
-    async fn test_next_price_stays_non_negative() {
+    async fn test_start_game() {
         // Arrange
         let adapter = InMemory::new();
-        let handler: PriceTickerHandler<&InMemory, &InMemory, &InMemory> = PriceTickerHandler::new(
-            &adapter,
-            &adapter,
-            &adapter,
-            Duration::from_millis(10),
-            100, // max_price_delta
-        );
+        let player = PlayerId::new();
 
-        // Act & Assert - run many times to test randomness
-        for _ in 0..100 {
-            let next = handler.next_price(0);
-            assert!(next >= 0, "Price should never be negative, got {}", next);
-        }
+        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let game_id = service.new_game(vec![player], 1000, test_config()).await.unwrap();
+
+        // Act
+        let result = service.start_game(game_id).await;
+
+        // Assert
+        assert!(result.is_ok());
+        let delay = result.unwrap();
+        assert_eq!(delay, Some(1000)); // tick_interval_ms from test_config
+
+        let events = adapter.get_game_events();
+        let has_started = events
+            .iter()
+            .any(|(_, notif)| matches!(notif, GameNotification::GameEvent(GameEvent::GameStarted { .. })));
+        assert!(has_started, "Expected GameStarted notification");
     }
 
     #[tokio::test]
-    async fn test_next_price_within_delta_range() {
+    async fn test_process_price_tick() {
         // Arrange
         let adapter = InMemory::new();
-        let max_delta = 10;
-        let handler: PriceTickerHandler<&InMemory, &InMemory, &InMemory> =
-            PriceTickerHandler::new(&adapter, &adapter, &adapter, Duration::from_millis(10), max_delta);
+        let player = PlayerId::new();
 
-        // Act & Assert
-        let current_price = 100;
-        for _ in 0..100 {
-            let next = handler.next_price(current_price);
-            let delta = (next - current_price).abs();
-            assert!(delta <= max_delta, "Price delta {} exceeds max_delta {}", delta, max_delta);
-        }
+        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let game_id = service.new_game(vec![player], 1000, test_config()).await.unwrap();
+        service.start_game(game_id).await.unwrap();
+
+        // Act
+        let result = service.process_price_tick(game_id).await;
+
+        // Assert
+        assert!(result.is_ok());
+        let delay = result.unwrap();
+        assert_eq!(delay, Some(1000)); // Should schedule next tick
+
+        let events = adapter.get_game_events();
+        let has_price_changed = events
+            .iter()
+            .any(|(_, notif)| matches!(notif, GameNotification::GameEvent(GameEvent::PriceChanged(_))));
+        assert!(has_price_changed, "Expected PriceChanged notification");
     }
 
     // ==================== LobbyService Tests ====================

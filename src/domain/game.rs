@@ -1,9 +1,26 @@
+use rand::Rng;
 use serde::Serialize;
 
 use super::PlayerId;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum GamePhase {
+    Pending,
+    Running,
+    Ended,
+}
+
+#[derive(Clone)]
+pub struct GameConfig {
+    pub tick_interval_ms: u64,
+    pub max_price_delta: i32,
+    pub starting_price: i32,
+}
+
 #[derive(Clone)]
 pub struct GameState {
+    phase: GamePhase,
+    config: GameConfig,
     current_price: i32,
     players: Vec<PlayerId>,
 
@@ -18,7 +35,8 @@ pub struct GameState {
 
 #[derive(Clone, Copy)]
 pub enum GameAction {
-    SetPrice(i32),
+    Start,
+    PriceTick,
     Bid { player_id: PlayerId, bid_value: i32 },
     Ask { player_id: PlayerId, ask_value: i32 },
     End,
@@ -26,6 +44,7 @@ pub enum GameAction {
 
 #[derive(Clone, Copy, Serialize)]
 pub enum GameEvent {
+    GameStarted { starting_price: i32 },
     PriceChanged(i32),
     BidPlaced { player_id: PlayerId, bid_value: i32 },
     AskPlaced { player_id: PlayerId, ask_value: i32 },
@@ -39,6 +58,7 @@ pub enum GameEvent {
 #[derive(Clone, Copy)]
 pub enum GameEffect {
     Notify { player_id: PlayerId, event: GameEvent },
+    SchedulePriceTick { delay_ms: u64 },
 }
 
 impl GameState {
@@ -47,7 +67,8 @@ impl GameState {
         action: GameAction,
     ) -> Vec<GameEffect> {
         match action {
-            GameAction::SetPrice(price) => self.handle_price(price),
+            GameAction::Start => self.handle_start(),
+            GameAction::PriceTick => self.handle_price_tick(),
             GameAction::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
             GameAction::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
             GameAction::End => self.handle_game_end(),
@@ -56,11 +77,14 @@ impl GameState {
 }
 
 impl GameState {
-    pub fn init(
+    pub fn new(
         players: Vec<PlayerId>,
         starting_balance: i32,
+        config: GameConfig,
     ) -> Self {
         Self {
+            phase: GamePhase::Pending,
+            config,
             cash_transactions: players.clone().into_iter().map(|pid| (pid, starting_balance)).collect(),
             players,
             share_transactions: Vec::new(),
@@ -70,28 +94,47 @@ impl GameState {
         }
     }
 
-    fn handle_game_end(&self) -> Vec<GameEffect> {
-        self.players
+    fn handle_start(&mut self) -> Vec<GameEffect> {
+        if self.phase != GamePhase::Pending {
+            return vec![];
+        }
+
+        self.phase = GamePhase::Running;
+        self.current_price = self.config.starting_price;
+
+        let mut effects: Vec<GameEffect> = self
+            .players
             .iter()
             .map(|&player_id| GameEffect::Notify {
                 player_id,
-                event: GameEvent::GameEnded,
+                event: GameEvent::GameStarted {
+                    starting_price: self.current_price,
+                },
             })
-            .collect()
+            .collect();
+
+        effects.push(GameEffect::SchedulePriceTick {
+            delay_ms: self.config.tick_interval_ms,
+        });
+
+        effects
     }
 
-    fn handle_price(
-        &mut self,
-        price: i32,
-    ) -> Vec<GameEffect> {
-        self.current_price = price;
+    fn handle_price_tick(&mut self) -> Vec<GameEffect> {
+        if self.phase != GamePhase::Running {
+            return vec![];
+        }
+
+        let mut rng = rand::thread_rng();
+        let delta = rng.gen_range(-self.config.max_price_delta..=self.config.max_price_delta);
+        self.current_price = (self.current_price + delta).max(0);
 
         let resolved_bids = self.resolve_bids();
         let resolved_asks = self.resolve_asks();
 
         let price_notifications = self.players.iter().map(|&player_id| GameEffect::Notify {
             player_id,
-            event: GameEvent::PriceChanged(price),
+            event: GameEvent::PriceChanged(self.current_price),
         });
 
         let bid_notifications = resolved_bids.into_iter().map(|(player_id, bid_value)| GameEffect::Notify {
@@ -104,9 +147,27 @@ impl GameState {
             event: GameEvent::AskResolved { player_id, ask_value },
         });
 
-        price_notifications
+        let mut effects: Vec<GameEffect> = price_notifications
             .chain(bid_notifications)
             .chain(ask_notifications)
+            .collect();
+
+        effects.push(GameEffect::SchedulePriceTick {
+            delay_ms: self.config.tick_interval_ms,
+        });
+
+        effects
+    }
+
+    fn handle_game_end(&mut self) -> Vec<GameEffect> {
+        self.phase = GamePhase::Ended;
+
+        self.players
+            .iter()
+            .map(|&player_id| GameEffect::Notify {
+                player_id,
+                event: GameEvent::GameEnded,
+            })
             .collect()
     }
 
@@ -137,6 +198,13 @@ impl GameState {
         player_id: PlayerId,
         bid_value: i32,
     ) -> Vec<GameEffect> {
+        if self.phase != GamePhase::Running {
+            return vec![GameEffect::Notify {
+                player_id,
+                event: GameEvent::BidRejected { player_id, bid_value },
+            }];
+        }
+
         if bid_value > self.get_cash_balance(player_id) {
             return vec![GameEffect::Notify {
                 player_id,
@@ -161,6 +229,13 @@ impl GameState {
         player_id: PlayerId,
         ask_value: i32,
     ) -> Vec<GameEffect> {
+        if self.phase != GamePhase::Running {
+            return vec![GameEffect::Notify {
+                player_id,
+                event: GameEvent::AskRejected { player_id, ask_value },
+            }];
+        }
+
         let owned_count = self.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
         let asking_count = self.open_asks.iter().filter(|(pid, _)| *pid == player_id).count();
 
@@ -200,6 +275,27 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_config() -> GameConfig {
+        GameConfig {
+            tick_interval_ms: 1000,
+            max_price_delta: 10,
+            starting_price: 50,
+        }
+    }
+
+    /// Create a game already in Running state at the given price
+    fn create_running_game(
+        players: Vec<PlayerId>,
+        starting_balance: i32,
+        price: i32,
+    ) -> GameState {
+        let mut config = test_config();
+        config.starting_price = price;
+        let mut game = GameState::new(players, starting_balance, config);
+        game.process_action(GameAction::Start);
+        game
+    }
 
     fn assert_cash(
         state: &GameState,
@@ -298,7 +394,8 @@ mod tests {
     #[test]
     fn test_transactions() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p], 100);
+        // Start at price 0 so bids don't immediately resolve
+        let mut engine = create_running_game(vec![p], 100, 0);
         engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 20,
@@ -315,7 +412,9 @@ mod tests {
         assert_cash(&engine, p, 0);
         assert_open_bids(&engine, p, 3, 100);
 
-        engine.process_action(GameAction::SetPrice(30));
+        // Set price directly and resolve (simulating what PriceTick does)
+        engine.current_price = 30;
+        engine.resolve_bids();
         // 2 bids for 40 filled @30, refund 10 each
         assert_cash(&engine, p, 20);
         assert_shares(&engine, p, 2, 60);
@@ -326,7 +425,10 @@ mod tests {
             ask_value: 75,
         });
         assert_open_asks(&engine, p, 1, 75);
-        engine.process_action(GameAction::SetPrice(100));
+
+        // Set price directly and resolve
+        engine.current_price = 100;
+        engine.resolve_asks();
         // ask filled @100
         assert_cash(&engine, p, 120);
         assert_shares(&engine, p, 1, 30);
@@ -337,7 +439,7 @@ mod tests {
     fn test_bid_rejection() {
         let valid_player = PlayerId(uuid::Uuid::new_v4());
         let invalid_player = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![valid_player], 100);
+        let mut engine = create_running_game(vec![valid_player], 100, 50);
 
         let effects = engine.process_action(GameAction::Bid {
             player_id: invalid_player,
@@ -357,7 +459,7 @@ mod tests {
     #[test]
     fn test_ask_rejection() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p], 100);
+        let mut engine = create_running_game(vec![p], 100, 50);
 
         // No shares owned, ask should be rejected
         let effects = engine.process_action(GameAction::Ask {
@@ -376,77 +478,97 @@ mod tests {
     }
 
     #[test]
-    fn test_price_notifications() {
+    fn test_start_game() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p1, p2], 100);
+        let mut config = test_config();
+        config.starting_price = 50;
+        let mut engine = GameState::new(vec![p1, p2], 100, config);
 
-        let effects = engine.process_action(GameAction::SetPrice(50));
+        assert_eq!(engine.phase, GamePhase::Pending);
 
-        // Should notify both players of the price
-        assert_eq!(effects.len(), 2);
-        let notified_players: Vec<_> = effects
+        let effects = engine.process_action(GameAction::Start);
+
+        assert_eq!(engine.phase, GamePhase::Running);
+        assert_eq!(engine.current_price, 50);
+
+        // Should have GameStarted notifications for both players + SchedulePriceTick
+        let started_notifications: Vec<_> = effects
             .iter()
-            .filter_map(|e| match e {
-                GameEffect::Notify {
-                    player_id,
-                    event: GameEvent::PriceChanged(50),
-                } => Some(*player_id),
-                _ => None,
+            .filter(|e| {
+                matches!(
+                    e,
+                    GameEffect::Notify {
+                        event: GameEvent::GameStarted { .. },
+                        ..
+                    }
+                )
             })
             .collect();
-        assert!(notified_players.contains(&p1));
-        assert!(notified_players.contains(&p2));
+        assert_eq!(started_notifications.len(), 2);
+
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, GameEffect::SchedulePriceTick { delay_ms: 1000 }))
+        );
+    }
+
+    #[test]
+    fn test_price_tick() {
+        let p1 = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = create_running_game(vec![p1], 100, 50);
+
+        let effects = engine.process_action(GameAction::PriceTick);
+
+        // Price should have changed (within delta range)
+        let price_delta = (engine.current_price - 50).abs();
+        assert!(price_delta <= 10, "Price delta {} exceeds max_delta 10", price_delta);
+
+        // Should have PriceChanged notification + SchedulePriceTick
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            GameEffect::Notify {
+                event: GameEvent::PriceChanged(_),
+                ..
+            }
+        )));
+        assert!(effects.iter().any(|e| matches!(e, GameEffect::SchedulePriceTick { .. })));
     }
 
     #[test]
     fn test_bid_resolved_notifications() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p], 100);
+        // Start at price 0 so the bid doesn't immediately resolve
+        let mut engine = create_running_game(vec![p], 100, 0);
 
         engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 40,
         });
-        let effects = engine.process_action(GameAction::SetPrice(30));
 
-        // Should have price notification + bid resolved notification
-        assert_eq!(effects.len(), 2);
+        // Set price to 30 and process a tick to trigger resolution
+        engine.current_price = 30;
+        let resolved = engine.resolve_bids();
 
-        let has_price = effects.iter().any(|e| {
-            matches!(
-                e,
-                GameEffect::Notify {
-                    event: GameEvent::PriceChanged(30),
-                    ..
-                }
-            )
-        });
-        let has_bid_resolved = effects.iter().any(|e| {
-            matches!(
-                e,
-                GameEffect::Notify {
-                    player_id,
-                    event: GameEvent::BidResolved { player_id: resolved_id, bid_value: 40 },
-                } if *player_id == p && *resolved_id == p
-            )
-        });
-
-        assert!(has_price, "Expected price notification");
-        assert!(has_bid_resolved, "Expected bid resolved notification");
+        // Should have resolved the bid
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0], (p, 40));
     }
 
     #[test]
     fn test_ask_resolved_notifications() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p], 100);
+        // Start at price 50 so bid resolves immediately
+        let mut engine = create_running_game(vec![p], 100, 50);
 
         // Buy a share first
         engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 50,
         });
-        engine.process_action(GameAction::SetPrice(50));
+        // Resolve the bid at current price
+        engine.resolve_bids();
         assert_shares(&engine, p, 1, 50);
 
         // Place an ask
@@ -456,19 +578,11 @@ mod tests {
         });
 
         // Price goes up, ask should be resolved
-        let effects = engine.process_action(GameAction::SetPrice(70));
+        engine.current_price = 70;
+        let resolved = engine.resolve_asks();
 
-        let has_ask_resolved = effects.iter().any(|e| {
-            matches!(
-                e,
-                GameEffect::Notify {
-                    player_id,
-                    event: GameEvent::AskResolved { player_id: resolved_id, ask_value: 60 },
-                } if *player_id == p && *resolved_id == p
-            )
-        });
-
-        assert!(has_ask_resolved, "Expected ask resolved notification");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0], (p, 60));
         assert_shares(&engine, p, 0, 0);
     }
 
@@ -476,7 +590,7 @@ mod tests {
     fn test_bid_placed_notifications() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p1, p2], 100);
+        let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
         let effects = engine.process_action(GameAction::Bid {
             player_id: p1,
@@ -507,14 +621,15 @@ mod tests {
     fn test_ask_placed_notifications() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p1, p2], 100);
+        // Start at price 50 so bid resolves immediately
+        let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
         // p1 needs to own a share first
         engine.process_action(GameAction::Bid {
             player_id: p1,
             bid_value: 50,
         });
-        engine.process_action(GameAction::SetPrice(50));
+        engine.resolve_bids();
 
         let effects = engine.process_action(GameAction::Ask {
             player_id: p1,
@@ -545,7 +660,7 @@ mod tests {
     fn test_game_end_notifications() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p1, p2], 100);
+        let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
         let effects = engine.process_action(GameAction::End);
 
@@ -568,14 +683,15 @@ mod tests {
     #[test]
     fn test_ask_rejected_when_insufficient_shares() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::init(vec![p], 100);
+        // Start at price 50 so bid resolves immediately
+        let mut engine = create_running_game(vec![p], 100, 50);
 
         // Buy one share
         engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 50,
         });
-        engine.process_action(GameAction::SetPrice(50));
+        engine.resolve_bids();
         assert_shares(&engine, p, 1, 50);
 
         // First ask should succeed
@@ -609,5 +725,39 @@ mod tests {
             } if player_id == p && rejected_id == p
         ));
         assert_open_asks(&engine, p, 1, 60);
+    }
+
+    #[test]
+    fn test_bid_rejected_when_not_running() {
+        let p = PlayerId(uuid::Uuid::new_v4());
+        let mut engine = GameState::new(vec![p], 100, test_config());
+
+        // Game is in Pending state, bid should be rejected
+        let effects = engine.process_action(GameAction::Bid {
+            player_id: p,
+            bid_value: 50,
+        });
+
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            effects[0],
+            GameEffect::Notify {
+                event: GameEvent::BidRejected { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_price_stays_non_negative() {
+        let p = PlayerId(uuid::Uuid::new_v4());
+        // Start at price 0
+        let mut engine = create_running_game(vec![p], 100, 0);
+
+        // Run many ticks to test that price never goes negative
+        for _ in 0..100 {
+            engine.process_action(GameAction::PriceTick);
+            assert!(engine.current_price >= 0, "Price should never be negative");
+        }
     }
 }

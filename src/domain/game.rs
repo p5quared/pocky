@@ -187,6 +187,12 @@ impl GameState {
     }
 
     fn handle_game_end(&mut self) -> Result<Vec<GameEffect>, GameError> {
+        if self.phase != GamePhase::Running {
+            return Err(GameError::InvalidPhase {
+                action: "End",
+                phase: self.phase.clone(),
+            });
+        }
         self.phase = GamePhase::Ended;
 
         Ok(self
@@ -488,7 +494,10 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(GameError::InsufficientFunds { available: 0, required: 50 })
+            Err(GameError::InsufficientFunds {
+                available: 0,
+                required: 50
+            })
         ));
     }
 
@@ -505,7 +514,10 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(GameError::InsufficientShares { available: 0, required: 1 })
+            Err(GameError::InsufficientShares {
+                available: 0,
+                required: 1
+            })
         ));
     }
 

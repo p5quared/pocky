@@ -5,25 +5,32 @@ use crate::domain::ports::{
     MatchmakingNotification, MatchmakingQueueRepository, MatchmakingServiceError,
 };
 
-use super::ports::{AsyncTimer, GameEventNotifier, GameNotification, GameRepository, GameServiceError};
+use super::ports::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
 use super::types::LobbyId;
 use super::{GameAction, GameConfig, GameEffect, LobbyAction, LobbyEffect, LobbyPhase, LobbyState, PlayerId, types::GameId};
 
-pub struct GameService<N, R> {
+pub struct GameService<N, R, S> {
     notifier: N,
     repository: R,
+    scheduler: S,
 }
 
-impl<N, R> GameService<N, R>
+impl<N, R, S> GameService<N, R, S>
 where
     N: GameEventNotifier,
     R: GameRepository,
+    S: GameEventScheduler,
 {
     pub fn new(
         notifier: N,
         repository: R,
+        scheduler: S,
     ) -> Self {
-        Self { notifier, repository }
+        Self {
+            notifier,
+            repository,
+            scheduler,
+        }
     }
 
     pub async fn place_bid(
@@ -37,7 +44,7 @@ where
         };
 
         let effects = game_state.process_action(GameAction::Bid { player_id, bid_value })?;
-        self.process_effects(effects).await;
+        self.process_effects(game_id, effects).await;
 
         self.repository.save_game(game_id, &game_state).await;
         Ok(())
@@ -54,7 +61,7 @@ where
         };
 
         let effects = game_state.process_action(GameAction::Ask { player_id, ask_value })?;
-        self.process_effects(effects).await;
+        self.process_effects(game_id, effects).await;
 
         self.repository.save_game(game_id, &game_state).await;
         Ok(())
@@ -75,7 +82,7 @@ where
     pub async fn start_game(
         &mut self,
         game_id: GameId,
-    ) -> Result<Option<u64>, GameServiceError> {
+    ) -> Result<(), GameServiceError> {
         let Some(mut game_state) = self.repository.load_game(game_id).await else {
             return Err(GameServiceError::GameNotFound(game_id));
         };
@@ -83,16 +90,15 @@ where
         let effects = game_state.process_action(GameAction::Start)?;
         self.repository.save_game(game_id, &game_state).await;
 
-        let scheduled_delay = Self::extract_scheduled_tick(&effects);
-        self.process_effects(effects).await;
+        self.process_effects(game_id, effects).await;
 
-        Ok(scheduled_delay)
+        Ok(())
     }
 
     pub async fn process_price_tick(
         &mut self,
         game_id: GameId,
-    ) -> Result<Option<u64>, GameServiceError> {
+    ) -> Result<(), GameServiceError> {
         let Some(mut game_state) = self.repository.load_game(game_id).await else {
             return Err(GameServiceError::GameNotFound(game_id));
         };
@@ -100,21 +106,14 @@ where
         let effects = game_state.process_action(GameAction::PriceTick)?;
         self.repository.save_game(game_id, &game_state).await;
 
-        let scheduled_delay = Self::extract_scheduled_tick(&effects);
-        self.process_effects(effects).await;
+        self.process_effects(game_id, effects).await;
 
-        Ok(scheduled_delay)
-    }
-
-    pub fn extract_scheduled_tick(effects: &[GameEffect]) -> Option<u64> {
-        effects.iter().find_map(|e| match e {
-            GameEffect::SchedulePriceTick { delay_ms } => Some(*delay_ms),
-            _ => None,
-        })
+        Ok(())
     }
 
     async fn process_effects(
         &mut self,
+        game_id: GameId,
         effects: Vec<GameEffect>,
     ) {
         for effect in effects {
@@ -124,8 +123,10 @@ where
                         .notify_player(player_id, GameNotification::GameEvent(event))
                         .await;
                 }
-                GameEffect::SchedulePriceTick { .. } => {
-                    // Handled by caller via extract_scheduled_tick
+                GameEffect::DelayedAction { delay_ms, action } => {
+                    self.scheduler
+                        .schedule_action(game_id, Duration::from_millis(delay_ms), action)
+                        .await;
                 }
             }
         }
@@ -532,7 +533,7 @@ mod tests {
         let game = create_test_game(vec![player], 1000);
         adapter.save_game(game_id, &game).await;
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
 
         // Act
         let result = service.place_bid(game_id, player, 50).await;
@@ -562,7 +563,7 @@ mod tests {
         let player = PlayerId::new();
         // Note: NOT saving any game to the repository
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
 
         // Act
         let result = service.place_bid(game_id, player, 50).await;
@@ -588,7 +589,7 @@ mod tests {
         game.process_action(GameAction::PriceTick).unwrap(); // This resolves the bid
         adapter.save_game(game_id, &game).await;
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
 
         // Act
         let result = service.place_ask(game_id, player, 60).await;
@@ -607,7 +608,7 @@ mod tests {
         let player = PlayerId::new();
         // Note: NOT saving any game to the repository
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
 
         // Act
         let result = service.place_ask(game_id, player, 50).await;
@@ -705,7 +706,7 @@ mod tests {
         let adapter = InMemory::new();
         let player = PlayerId::new();
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
         let game_id = service.new_game(vec![player], 1000, test_config()).await.unwrap();
 
         // Act
@@ -713,8 +714,6 @@ mod tests {
 
         // Assert
         assert!(result.is_ok());
-        let delay = result.unwrap();
-        assert_eq!(delay, Some(1000)); // tick_interval_ms from test_config
 
         let events = adapter.get_game_events();
         let has_started = events
@@ -729,7 +728,7 @@ mod tests {
         let adapter = InMemory::new();
         let player = PlayerId::new();
 
-        let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);
+        let mut service: GameService<&InMemory, &InMemory, &InMemory> = GameService::new(&adapter, &adapter, &adapter);
         let game_id = service.new_game(vec![player], 1000, test_config()).await.unwrap();
         service.start_game(game_id).await.unwrap();
 
@@ -738,8 +737,6 @@ mod tests {
 
         // Assert
         assert!(result.is_ok());
-        let delay = result.unwrap();
-        assert_eq!(delay, Some(1000)); // Should schedule next tick
 
         let events = adapter.get_game_events();
         let has_price_changed = events

@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::types::LobbyId;
-use super::{GameError, GameEvent, GameState, LobbyEvent, LobbyState, PlayerId, types::GameId};
+use super::{GameAction, GameError, GameEvent, GameState, LobbyEvent, LobbyState, PlayerId, types::GameId};
 
 #[derive(Debug)]
 pub enum GameServiceError {
@@ -80,6 +80,15 @@ pub trait AsyncTimer {
     fn sleep(
         &self,
         duration: Duration,
+    ) -> impl Future<Output = ()> + Send;
+}
+
+pub trait GameEventScheduler {
+    fn schedule_action(
+        &self,
+        game_id: GameId,
+        delay: Duration,
+        action: GameAction,
     ) -> impl Future<Output = ()> + Send;
 }
 

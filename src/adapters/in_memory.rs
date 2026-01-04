@@ -3,14 +3,15 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::domain::ports::{
-    AsyncTimer, GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification, LobbyRepository,
-    MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
+    AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, LobbyEventNotifier,
+    LobbyNotification, LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
-use crate::domain::{GameId, GameState, LobbyId, LobbyState, PlayerId};
+use crate::domain::{GameAction, GameId, GameState, LobbyId, LobbyState, PlayerId};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,
     game_events: RwLock<Vec<(PlayerId, GameNotification)>>,
+    scheduled_actions: RwLock<Vec<(GameId, Duration, GameAction)>>,
     matchmaking_queue: RwLock<Vec<PlayerId>>,
     matchmaking_events: RwLock<Vec<(PlayerId, MatchmakingNotification)>>,
     lobbies: RwLock<HashMap<LobbyId, LobbyState>>,
@@ -43,6 +44,7 @@ impl InMemory {
         Self {
             games: RwLock::new(HashMap::new()),
             game_events: RwLock::new(Vec::new()),
+            scheduled_actions: RwLock::new(Vec::new()),
             matchmaking_queue: RwLock::new(Vec::new()),
             matchmaking_events: RwLock::new(Vec::new()),
             lobbies: RwLock::new(HashMap::new()),
@@ -61,6 +63,10 @@ impl InMemory {
 
     pub fn get_lobby_events(&self) -> Vec<(PlayerId, LobbyNotification)> {
         self.lobby_events.read().unwrap().clone()
+    }
+
+    pub fn get_scheduled_actions(&self) -> Vec<(GameId, Duration, GameAction)> {
+        self.scheduled_actions.read().unwrap().clone()
     }
 }
 
@@ -165,6 +171,28 @@ impl AsyncTimer for &InMemory {
         _duration: Duration,
     ) {
         // No-op for testing - instant return
+    }
+}
+
+impl GameEventScheduler for InMemory {
+    async fn schedule_action(
+        &self,
+        game_id: GameId,
+        delay: Duration,
+        action: GameAction,
+    ) {
+        self.scheduled_actions.write().unwrap().push((game_id, delay, action));
+    }
+}
+
+impl GameEventScheduler for &InMemory {
+    async fn schedule_action(
+        &self,
+        game_id: GameId,
+        delay: Duration,
+        action: GameAction,
+    ) {
+        self.scheduled_actions.write().unwrap().push((game_id, delay, action));
     }
 }
 

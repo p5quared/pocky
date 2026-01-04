@@ -9,8 +9,8 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
 use crate::domain::ports::{
-    GameEventNotifier, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification, LobbyRepository,
-    MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
+    GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
+    LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
 use crate::domain::services::{GameService, LobbyService, MatchmakingService};
 use crate::domain::{GameId, LobbyId, PlayerId};
@@ -30,9 +30,9 @@ pub enum IncomingMessage {
     Unready { lobby_id: LobbyId },
 }
 
-pub struct AppState<GN, GR, MN, MR, LN, LR> {
+pub struct AppState<GN, GR, GS, MN, MR, LN, LR> {
     pub adapter: Arc<WebSocketAdapter>,
-    pub game_service: Arc<TokioMutex<GameService<GN, GR>>>,
+    pub game_service: Arc<TokioMutex<GameService<GN, GR, GS>>>,
     pub matchmaking_service: Arc<MatchmakingService<MN, MR>>,
     pub lobby_service: Arc<LobbyService<LN, LR>>,
 }
@@ -114,13 +114,14 @@ impl LobbyEventNotifier for WebSocketAdapter {
     }
 }
 
-pub async fn handle_connection<GN, GR, MN, MR, LN, LR>(
+pub async fn handle_connection<GN, GR, GS, MN, MR, LN, LR>(
     ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState<GN, GR, MN, MR, LN, LR>>>,
+    State(state): State<Arc<AppState<GN, GR, GS, MN, MR, LN, LR>>>,
 ) -> impl IntoResponse
 where
     GN: GameEventNotifier + Send + 'static,
     GR: GameRepository + Send + 'static,
+    GS: GameEventScheduler + Send + 'static,
     MN: MatchmakingEventNotifier + Send + Sync + 'static,
     MR: MatchmakingQueueRepository + Send + Sync + 'static,
     LN: LobbyEventNotifier + Send + Sync + 'static,
@@ -136,13 +137,14 @@ where
     })
 }
 
-async fn handle_messages<GN, GR, MN, MR, LN, LR>(
+async fn handle_messages<GN, GR, GS, MN, MR, LN, LR>(
     player_id: PlayerId,
     mut receiver: SplitStream<WebSocket>,
-    state: Arc<AppState<GN, GR, MN, MR, LN, LR>>,
+    state: Arc<AppState<GN, GR, GS, MN, MR, LN, LR>>,
 ) where
     GN: GameEventNotifier + Send,
     GR: GameRepository + Send,
+    GS: GameEventScheduler + Send,
     MN: MatchmakingEventNotifier + Send + Sync,
     MR: MatchmakingQueueRepository + Send + Sync,
     LN: LobbyEventNotifier + Send + Sync,

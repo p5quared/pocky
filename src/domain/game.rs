@@ -79,7 +79,7 @@ pub enum GameEvent {
 #[derive(Clone, Copy)]
 pub enum GameEffect {
     Notify { player_id: PlayerId, event: GameEvent },
-    SchedulePriceTick { delay_ms: u64 },
+    DelayedAction { delay_ms: u64, action: GameAction },
 }
 
 impl GameState {
@@ -137,8 +137,9 @@ impl GameState {
             })
             .collect();
 
-        effects.push(GameEffect::SchedulePriceTick {
+        effects.push(GameEffect::DelayedAction {
             delay_ms: self.config.tick_interval_ms,
+            action: GameAction::PriceTick,
         });
 
         Ok(effects)
@@ -179,8 +180,9 @@ impl GameState {
             .chain(ask_notifications)
             .collect();
 
-        effects.push(GameEffect::SchedulePriceTick {
+        effects.push(GameEffect::DelayedAction {
             delay_ms: self.config.tick_interval_ms,
+            action: GameAction::PriceTick,
         });
 
         Ok(effects)
@@ -551,11 +553,13 @@ mod tests {
             .collect();
         assert_eq!(started_notifications.len(), 2);
 
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, GameEffect::SchedulePriceTick { delay_ms: 1000 }))
-        );
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            GameEffect::DelayedAction {
+                delay_ms: 1000,
+                action: GameAction::PriceTick
+            }
+        )),);
     }
 
     #[test]
@@ -577,7 +581,13 @@ mod tests {
                 ..
             }
         )));
-        assert!(effects.iter().any(|e| matches!(e, GameEffect::SchedulePriceTick { .. })));
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            GameEffect::DelayedAction {
+                action: GameAction::PriceTick,
+                ..
+            }
+        )));
     }
 
     #[test]

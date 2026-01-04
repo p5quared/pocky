@@ -17,6 +17,16 @@ pub struct GameConfig {
     pub starting_price: i32,
 }
 
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_ms: 1,
+            max_price_delta: 25,
+            starting_price: 100,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct GameState {
     phase: GamePhase,

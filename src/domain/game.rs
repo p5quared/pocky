@@ -1,7 +1,20 @@
 use rand::Rng;
 use serde::Serialize;
+use thiserror::Error;
 
 use super::PlayerId;
+
+#[derive(Debug, Clone, Error)]
+pub enum GameError {
+    #[error("action {action} not valid in phase {phase:?}")]
+    InvalidPhase { action: &'static str, phase: GamePhase },
+
+    #[error("insufficient funds: have {available}, need {required}")]
+    InsufficientFunds { available: i32, required: i32 },
+
+    #[error("insufficient shares: have {available}, need {required}")]
+    InsufficientShares { available: usize, required: usize },
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GamePhase {
@@ -60,8 +73,6 @@ pub enum GameEvent {
     AskPlaced { player_id: PlayerId, ask_value: i32 },
     BidResolved { player_id: PlayerId, bid_value: i32 },
     AskResolved { player_id: PlayerId, ask_value: i32 },
-    BidRejected { player_id: PlayerId, bid_value: i32 },
-    AskRejected { player_id: PlayerId, ask_value: i32 },
     GameEnded,
 }
 
@@ -75,7 +86,7 @@ impl GameState {
     pub fn process_action(
         &mut self,
         action: GameAction,
-    ) -> Vec<GameEffect> {
+    ) -> Result<Vec<GameEffect>, GameError> {
         match action {
             GameAction::Start => self.handle_start(),
             GameAction::PriceTick => self.handle_price_tick(),
@@ -104,9 +115,12 @@ impl GameState {
         }
     }
 
-    fn handle_start(&mut self) -> Vec<GameEffect> {
+    fn handle_start(&mut self) -> Result<Vec<GameEffect>, GameError> {
         if self.phase != GamePhase::Pending {
-            return vec![];
+            return Err(GameError::InvalidPhase {
+                action: "Start",
+                phase: self.phase.clone(),
+            });
         }
 
         self.phase = GamePhase::Running;
@@ -127,12 +141,15 @@ impl GameState {
             delay_ms: self.config.tick_interval_ms,
         });
 
-        effects
+        Ok(effects)
     }
 
-    fn handle_price_tick(&mut self) -> Vec<GameEffect> {
+    fn handle_price_tick(&mut self) -> Result<Vec<GameEffect>, GameError> {
         if self.phase != GamePhase::Running {
-            return vec![];
+            return Err(GameError::InvalidPhase {
+                action: "PriceTick",
+                phase: self.phase.clone(),
+            });
         }
 
         let mut rng = rand::thread_rng();
@@ -166,19 +183,20 @@ impl GameState {
             delay_ms: self.config.tick_interval_ms,
         });
 
-        effects
+        Ok(effects)
     }
 
-    fn handle_game_end(&mut self) -> Vec<GameEffect> {
+    fn handle_game_end(&mut self) -> Result<Vec<GameEffect>, GameError> {
         self.phase = GamePhase::Ended;
 
-        self.players
+        Ok(self
+            .players
             .iter()
             .map(|&player_id| GameEffect::Notify {
                 player_id,
                 event: GameEvent::GameEnded,
             })
-            .collect()
+            .collect())
     }
 
     fn resolve_bids(&mut self) -> Vec<(PlayerId, i32)> {
@@ -207,64 +225,67 @@ impl GameState {
         &mut self,
         player_id: PlayerId,
         bid_value: i32,
-    ) -> Vec<GameEffect> {
+    ) -> Result<Vec<GameEffect>, GameError> {
         if self.phase != GamePhase::Running {
-            return vec![GameEffect::Notify {
-                player_id,
-                event: GameEvent::BidRejected { player_id, bid_value },
-            }];
+            return Err(GameError::InvalidPhase {
+                action: "Bid",
+                phase: self.phase.clone(),
+            });
         }
 
-        if bid_value > self.get_cash_balance(player_id) {
-            return vec![GameEffect::Notify {
-                player_id,
-                event: GameEvent::BidRejected { player_id, bid_value },
-            }];
+        let balance = self.get_cash_balance(player_id);
+        if bid_value > balance {
+            return Err(GameError::InsufficientFunds {
+                available: balance,
+                required: bid_value,
+            });
         }
 
         self.cash_transactions.push((player_id, -bid_value));
         self.open_bids.push((player_id, bid_value));
 
-        self.players
+        Ok(self
+            .players
             .iter()
             .map(|&pid| GameEffect::Notify {
                 player_id: pid,
                 event: GameEvent::BidPlaced { player_id, bid_value },
             })
-            .collect()
+            .collect())
     }
 
     fn handle_ask(
         &mut self,
         player_id: PlayerId,
         ask_value: i32,
-    ) -> Vec<GameEffect> {
+    ) -> Result<Vec<GameEffect>, GameError> {
         if self.phase != GamePhase::Running {
-            return vec![GameEffect::Notify {
-                player_id,
-                event: GameEvent::AskRejected { player_id, ask_value },
-            }];
+            return Err(GameError::InvalidPhase {
+                action: "Ask",
+                phase: self.phase.clone(),
+            });
         }
 
         let owned_count = self.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
         let asking_count = self.open_asks.iter().filter(|(pid, _)| *pid == player_id).count();
 
         if owned_count <= asking_count {
-            return vec![GameEffect::Notify {
-                player_id,
-                event: GameEvent::AskRejected { player_id, ask_value },
-            }];
+            return Err(GameError::InsufficientShares {
+                available: owned_count.saturating_sub(asking_count),
+                required: 1,
+            });
         }
 
         self.open_asks.push((player_id, ask_value));
 
-        self.players
+        Ok(self
+            .players
             .iter()
             .map(|&pid| GameEffect::Notify {
                 player_id: pid,
                 event: GameEvent::AskPlaced { player_id, ask_value },
             })
-            .collect()
+            .collect())
     }
 
     fn resolve_asks(&mut self) -> Vec<(PlayerId, i32)> {
@@ -303,7 +324,7 @@ mod tests {
         let mut config = test_config();
         config.starting_price = price;
         let mut game = GameState::new(players, starting_balance, config);
-        game.process_action(GameAction::Start);
+        game.process_action(GameAction::Start).unwrap();
         game
     }
 
@@ -406,18 +427,24 @@ mod tests {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 0 so bids don't immediately resolve
         let mut engine = create_running_game(vec![p], 100, 0);
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 20,
-        });
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 40,
-        });
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 40,
-        });
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 20,
+            })
+            .unwrap();
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 40,
+            })
+            .unwrap();
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 40,
+            })
+            .unwrap();
 
         assert_cash(&engine, p, 0);
         assert_open_bids(&engine, p, 3, 100);
@@ -430,10 +457,12 @@ mod tests {
         assert_shares(&engine, p, 2, 60);
         assert_open_bids(&engine, p, 1, 20);
 
-        engine.process_action(GameAction::Ask {
-            player_id: p,
-            ask_value: 75,
-        });
+        engine
+            .process_action(GameAction::Ask {
+                player_id: p,
+                ask_value: 75,
+            })
+            .unwrap();
         assert_open_asks(&engine, p, 1, 75);
 
         // Set price directly and resolve
@@ -446,44 +475,37 @@ mod tests {
     }
 
     #[test]
-    fn test_bid_rejection() {
+    fn test_bid_insufficient_funds() {
         let valid_player = PlayerId(uuid::Uuid::new_v4());
         let invalid_player = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![valid_player], 100, 50);
 
-        let effects = engine.process_action(GameAction::Bid {
+        // Player not in game has 0 balance
+        let result = engine.process_action(GameAction::Bid {
             player_id: invalid_player,
             bid_value: 50,
         });
 
-        assert_eq!(effects.len(), 1);
         assert!(matches!(
-            effects[0],
-            GameEffect::Notify {
-                player_id,
-                event: GameEvent::BidRejected { player_id: rejected_id, bid_value: 50 },
-            } if player_id == invalid_player && rejected_id == invalid_player
+            result,
+            Err(GameError::InsufficientFunds { available: 0, required: 50 })
         ));
     }
 
     #[test]
-    fn test_ask_rejection() {
+    fn test_ask_insufficient_shares() {
         let p = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![p], 100, 50);
 
-        // No shares owned, ask should be rejected
-        let effects = engine.process_action(GameAction::Ask {
+        // No shares owned, ask should return error
+        let result = engine.process_action(GameAction::Ask {
             player_id: p,
             ask_value: 50,
         });
 
-        assert_eq!(effects.len(), 1);
         assert!(matches!(
-            effects[0],
-            GameEffect::Notify {
-                player_id,
-                event: GameEvent::AskRejected { player_id: rejected_id, ask_value: 50 },
-            } if player_id == p && rejected_id == p
+            result,
+            Err(GameError::InsufficientShares { available: 0, required: 1 })
         ));
     }
 
@@ -497,7 +519,7 @@ mod tests {
 
         assert_eq!(engine.phase, GamePhase::Pending);
 
-        let effects = engine.process_action(GameAction::Start);
+        let effects = engine.process_action(GameAction::Start).unwrap();
 
         assert_eq!(engine.phase, GamePhase::Running);
         assert_eq!(engine.current_price, 50);
@@ -529,7 +551,7 @@ mod tests {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![p1], 100, 50);
 
-        let effects = engine.process_action(GameAction::PriceTick);
+        let effects = engine.process_action(GameAction::PriceTick).unwrap();
 
         // Price should have changed (within delta range)
         let price_delta = (engine.current_price - 50).abs();
@@ -552,10 +574,12 @@ mod tests {
         // Start at price 0 so the bid doesn't immediately resolve
         let mut engine = create_running_game(vec![p], 100, 0);
 
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 40,
-        });
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 40,
+            })
+            .unwrap();
 
         // Set price to 30 and process a tick to trigger resolution
         engine.current_price = 30;
@@ -573,19 +597,23 @@ mod tests {
         let mut engine = create_running_game(vec![p], 100, 50);
 
         // Buy a share first
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 50,
-        });
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 50,
+            })
+            .unwrap();
         // Resolve the bid at current price
         engine.resolve_bids();
         assert_shares(&engine, p, 1, 50);
 
         // Place an ask
-        engine.process_action(GameAction::Ask {
-            player_id: p,
-            ask_value: 60,
-        });
+        engine
+            .process_action(GameAction::Ask {
+                player_id: p,
+                ask_value: 60,
+            })
+            .unwrap();
 
         // Price goes up, ask should be resolved
         engine.current_price = 70;
@@ -602,10 +630,12 @@ mod tests {
         let p2 = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
-        let effects = engine.process_action(GameAction::Bid {
-            player_id: p1,
-            bid_value: 50,
-        });
+        let effects = engine
+            .process_action(GameAction::Bid {
+                player_id: p1,
+                bid_value: 50,
+            })
+            .unwrap();
 
         // Both players should be notified of the bid
         assert_eq!(effects.len(), 2);
@@ -635,16 +665,20 @@ mod tests {
         let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
         // p1 needs to own a share first
-        engine.process_action(GameAction::Bid {
-            player_id: p1,
-            bid_value: 50,
-        });
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p1,
+                bid_value: 50,
+            })
+            .unwrap();
         engine.resolve_bids();
 
-        let effects = engine.process_action(GameAction::Ask {
-            player_id: p1,
-            ask_value: 60,
-        });
+        let effects = engine
+            .process_action(GameAction::Ask {
+                player_id: p1,
+                ask_value: 60,
+            })
+            .unwrap();
 
         // Both players should be notified of the ask
         assert_eq!(effects.len(), 2);
@@ -672,7 +706,7 @@ mod tests {
         let p2 = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![p1, p2], 100, 50);
 
-        let effects = engine.process_action(GameAction::End);
+        let effects = engine.process_action(GameAction::End).unwrap();
 
         // Should notify both players of game end
         assert_eq!(effects.len(), 2);
@@ -691,24 +725,28 @@ mod tests {
     }
 
     #[test]
-    fn test_ask_rejected_when_insufficient_shares() {
+    fn test_ask_error_when_insufficient_shares() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 50 so bid resolves immediately
         let mut engine = create_running_game(vec![p], 100, 50);
 
         // Buy one share
-        engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 50,
-        });
+        engine
+            .process_action(GameAction::Bid {
+                player_id: p,
+                bid_value: 50,
+            })
+            .unwrap();
         engine.resolve_bids();
         assert_shares(&engine, p, 1, 50);
 
         // First ask should succeed
-        let effects = engine.process_action(GameAction::Ask {
-            player_id: p,
-            ask_value: 60,
-        });
+        let effects = engine
+            .process_action(GameAction::Ask {
+                player_id: p,
+                ask_value: 60,
+            })
+            .unwrap();
         assert!(
             effects.iter().any(|e| matches!(
                 e,
@@ -721,40 +759,38 @@ mod tests {
         );
         assert_open_asks(&engine, p, 1, 60);
 
-        // Second ask should be rejected - only 1 share but already 1 open ask
-        let effects = engine.process_action(GameAction::Ask {
+        // Second ask should return InsufficientShares error - only 1 share but already 1 open ask
+        let result = engine.process_action(GameAction::Ask {
             player_id: p,
             ask_value: 70,
         });
-        assert_eq!(effects.len(), 1);
         assert!(matches!(
-            effects[0],
-            GameEffect::Notify {
-                player_id,
-                event: GameEvent::AskRejected { player_id: rejected_id, ask_value: 70 },
-            } if player_id == p && rejected_id == p
+            result,
+            Err(GameError::InsufficientShares {
+                available: 0,
+                required: 1
+            })
         ));
         assert_open_asks(&engine, p, 1, 60);
     }
 
     #[test]
-    fn test_bid_rejected_when_not_running() {
+    fn test_bid_error_when_not_running() {
         let p = PlayerId(uuid::Uuid::new_v4());
         let mut engine = GameState::new(vec![p], 100, test_config());
 
-        // Game is in Pending state, bid should be rejected
-        let effects = engine.process_action(GameAction::Bid {
+        // Game is in Pending state, bid should return InvalidPhase error
+        let result = engine.process_action(GameAction::Bid {
             player_id: p,
             bid_value: 50,
         });
 
-        assert_eq!(effects.len(), 1);
         assert!(matches!(
-            effects[0],
-            GameEffect::Notify {
-                event: GameEvent::BidRejected { .. },
-                ..
-            }
+            result,
+            Err(GameError::InvalidPhase {
+                action: "Bid",
+                phase: GamePhase::Pending
+            })
         ));
     }
 
@@ -766,7 +802,7 @@ mod tests {
 
         // Run many ticks to test that price never goes negative
         for _ in 0..100 {
-            engine.process_action(GameAction::PriceTick);
+            engine.process_action(GameAction::PriceTick).unwrap();
             assert!(engine.current_price >= 0, "Price should never be negative");
         }
     }

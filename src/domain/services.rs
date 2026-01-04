@@ -36,7 +36,7 @@ where
             return Err(GameServiceError::GameNotFound(game_id));
         };
 
-        let effects = game_state.process_action(GameAction::Bid { player_id, bid_value });
+        let effects = game_state.process_action(GameAction::Bid { player_id, bid_value })?;
         self.process_effects(effects).await;
 
         self.repository.save_game(game_id, &game_state).await;
@@ -53,7 +53,7 @@ where
             return Err(GameServiceError::GameNotFound(game_id));
         };
 
-        let effects = game_state.process_action(GameAction::Ask { player_id, ask_value });
+        let effects = game_state.process_action(GameAction::Ask { player_id, ask_value })?;
         self.process_effects(effects).await;
 
         self.repository.save_game(game_id, &game_state).await;
@@ -80,7 +80,7 @@ where
             return Err(GameServiceError::GameNotFound(game_id));
         };
 
-        let effects = game_state.process_action(GameAction::Start);
+        let effects = game_state.process_action(GameAction::Start)?;
         self.repository.save_game(game_id, &game_state).await;
 
         let scheduled_delay = Self::extract_scheduled_tick(&effects);
@@ -97,7 +97,7 @@ where
             return Err(GameServiceError::GameNotFound(game_id));
         };
 
-        let effects = game_state.process_action(GameAction::PriceTick);
+        let effects = game_state.process_action(GameAction::PriceTick)?;
         self.repository.save_game(game_id, &game_state).await;
 
         let scheduled_delay = Self::extract_scheduled_tick(&effects);
@@ -517,7 +517,7 @@ mod tests {
     ) -> GameState {
         let mut game = GameState::new(players, starting_balance, test_config());
         // Start the game so it's in Running state for tests
-        game.process_action(GameAction::Start);
+        game.process_action(GameAction::Start).unwrap();
         game
     }
 
@@ -578,12 +578,14 @@ mod tests {
         let game_id = GameId::new();
         let player = PlayerId::new();
         let mut game = create_test_game(vec![player], 1000);
-        // Give player some shares first by placing a bid and processing a price tick
+        // Give player some shares first by placing a bid high enough to always resolve
+        // (starting price 50 + max delta 10 = 60 max, so bid of 100 always resolves)
         game.process_action(GameAction::Bid {
             player_id: player,
-            bid_value: 50,
-        });
-        game.process_action(GameAction::PriceTick); // This resolves the bid, giving shares
+            bid_value: 100,
+        })
+        .unwrap();
+        game.process_action(GameAction::PriceTick).unwrap(); // This resolves the bid
         adapter.save_game(game_id, &game).await;
 
         let mut service: GameService<&InMemory, &InMemory> = GameService::new(&adapter, &adapter);

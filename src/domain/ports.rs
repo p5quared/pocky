@@ -3,11 +3,18 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::types::LobbyId;
-use super::{GameEvent, GameState, LobbyEvent, LobbyState, PlayerId, types::GameId};
+use super::{GameError, GameEvent, GameState, LobbyEvent, LobbyState, PlayerId, types::GameId};
 
 #[derive(Debug)]
 pub enum GameServiceError {
     GameNotFound(GameId),
+    GameError(GameError),
+}
+
+impl From<GameError> for GameServiceError {
+    fn from(err: GameError) -> Self {
+        GameServiceError::GameError(err)
+    }
 }
 
 #[derive(Clone, Serialize)]

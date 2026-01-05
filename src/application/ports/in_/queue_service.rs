@@ -18,32 +18,26 @@ impl<R: QueueRepository, N: QueueNotifier> MatchmakingQueueService<R, N> {
         &self,
         player_id: PlayerId,
     ) -> MatchmakingOutcome {
-        let notifier = &self.notifier;
-        self.repository.with_state(|q| {
-            let event = q.execute(MatchmakingCommand::PlayerJoin(player_id));
-            notifier.broadcast(q.players(), &event);
-            event
-        })
+        let mut q = self.repository.load();
+        let event = q.execute(MatchmakingCommand::PlayerJoin(player_id));
+        self.notifier.broadcast(q.players(), &event);
+        event
     }
 
     pub fn remove_player(
         &self,
         player_id: PlayerId,
     ) -> MatchmakingOutcome {
-        let notifier = &self.notifier;
-        self.repository.with_state(|q| {
-            let event = q.execute(MatchmakingCommand::PlayerLeave(player_id));
-            notifier.broadcast(q.players(), &event);
-            event
-        })
+        let mut q = self.repository.load();
+        let event = q.execute(MatchmakingCommand::PlayerLeave(player_id));
+        self.notifier.broadcast(q.players(), &event);
+        event
     }
 
     pub fn try_matchmake(&self) -> MatchmakingOutcome {
-        let notifier = &self.notifier;
-        self.repository.with_state(|q| {
-            let event = q.execute(MatchmakingCommand::TryMatchmake);
-            notifier.broadcast(q.players(), &event);
-            event
-        })
+        let mut q = self.repository.load();
+        let event = q.execute(MatchmakingCommand::TryMatchmake);
+        self.notifier.broadcast(q.players(), &event);
+        event
     }
 }

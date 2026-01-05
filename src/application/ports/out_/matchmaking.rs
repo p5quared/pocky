@@ -36,19 +36,6 @@ pub trait QueueRepository {
         queue: MatchmakingQueue,
     );
     fn load(&self) -> MatchmakingQueue;
-
-    fn with_state<F, R>(
-        &self,
-        f: F,
-    ) -> R
-    where
-        F: FnOnce(&mut MatchmakingQueue) -> R,
-    {
-        let mut state = self.load();
-        let result = f(&mut state);
-        self.save(state);
-        result
-    }
 }
 
 pub trait QueueNotifier {

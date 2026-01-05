@@ -1,8 +1,7 @@
+use super::PlayerId;
 use rand::Rng;
 use serde::Serialize;
 use thiserror::Error;
-
-use super::PlayerId;
 
 #[derive(Debug, Clone, Error)]
 pub enum GameError {

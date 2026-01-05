@@ -1,2 +1,2 @@
-pub mod adapters;
-pub mod domain;
+pub mod adapter;
+pub mod application;

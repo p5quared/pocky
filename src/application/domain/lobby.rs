@@ -2,8 +2,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use super::types::LobbyId;
-use super::{GameId, PlayerId};
+use super::{GameId, LobbyId, PlayerId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LobbyPhase {

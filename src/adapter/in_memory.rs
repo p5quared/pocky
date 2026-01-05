@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use crate::domain::ports::{
+use crate::application::domain::{GameAction, GameId, GameState, LobbyId, LobbyState, PlayerId};
+use crate::application::ports::out_::{
     AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, LobbyEventNotifier,
     LobbyNotification, LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
-use crate::domain::{GameAction, GameId, GameState, LobbyId, LobbyState, PlayerId};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,

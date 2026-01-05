@@ -8,12 +8,12 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
-use crate::domain::ports::{
+use crate::application::domain::{GameId, LobbyId, PlayerId};
+use crate::application::ports::in_::{GameService, LobbyService, MatchmakingService};
+use crate::application::ports::out_::{
     GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
     LobbyRepository, MatchmakingEventNotifier, MatchmakingNotification, MatchmakingQueueRepository,
 };
-use crate::domain::services::{GameService, LobbyService, MatchmakingService};
-use crate::domain::{GameId, LobbyId, PlayerId};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 

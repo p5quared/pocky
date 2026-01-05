@@ -1,9 +1,10 @@
 use super::PlayerId;
 
+#[derive(Default)]
 pub struct MatchmakingQueue(Vec<PlayerId>);
 
 impl MatchmakingQueue {
-    pub fn players(&self) -> &[PlayerId] {
+    pub fn players(&self) -> &Vec<PlayerId> {
         &self.0
     }
 }
@@ -16,42 +17,48 @@ pub enum MatchmakingCommand {
 
 pub enum MatchmakingOutcome {
     Matched(Vec<PlayerId>),
-    Queued(PlayerId),
+    Enqueued(PlayerId),
     Dequeued(PlayerId),
     PlayerNotFound,
     AlreadyQueued,
 }
 
-pub fn execute(
-    queue: &mut MatchmakingQueue,
-    command: MatchmakingCommand,
-) -> MatchmakingOutcome {
-    match command {
-        MatchmakingCommand::PlayerJoin(player_id) => {
-            if !queue.0.contains(&player_id) {
-                queue.0.push(player_id);
-                MatchmakingOutcome::Queued(player_id)
-            } else {
-                MatchmakingOutcome::AlreadyQueued
+impl MatchmakingQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn execute(
+        &mut self,
+        command: MatchmakingCommand,
+    ) -> MatchmakingOutcome {
+        match command {
+            MatchmakingCommand::PlayerJoin(player_id) => {
+                if !self.0.contains(&player_id) {
+                    self.0.push(player_id);
+                    MatchmakingOutcome::Enqueued(player_id)
+                } else {
+                    MatchmakingOutcome::AlreadyQueued
+                }
             }
-        }
-        MatchmakingCommand::PlayerLeave(player_id) => {
-            if let Some(pos) = queue.0.iter().position(|&pid| pid == player_id) {
-                queue.0.remove(pos);
-                MatchmakingOutcome::Dequeued(player_id)
-            } else {
-                MatchmakingOutcome::PlayerNotFound
+            MatchmakingCommand::PlayerLeave(player_id) => {
+                if let Some(pos) = self.0.iter().position(|&pid| pid == player_id) {
+                    self.0.remove(pos);
+                    MatchmakingOutcome::Dequeued(player_id)
+                } else {
+                    MatchmakingOutcome::PlayerNotFound
+                }
             }
-        }
-        MatchmakingCommand::TryMatchmake => {
-            let mut events = Vec::new();
-            while queue.0.len() >= 2 {
-                let player1 = queue.0.remove(0);
-                let player2 = queue.0.remove(0);
-                events.push(player1);
-                events.push(player2);
+            MatchmakingCommand::TryMatchmake => {
+                let mut events = Vec::new();
+                while self.0.len() >= 2 {
+                    let player1 = self.0.remove(0);
+                    let player2 = self.0.remove(0);
+                    events.push(player1);
+                    events.push(player2);
+                }
+                MatchmakingOutcome::Matched(events)
             }
-            MatchmakingOutcome::Matched(events)
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::application::domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId, queue_execute};
+use crate::application::domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
 use crate::application::ports::out_::{QueueNotifier, QueueRepository};
 
 pub struct MatchmakingQueueService<R: QueueRepository, N: QueueNotifier> {
@@ -20,7 +20,7 @@ impl<R: QueueRepository, N: QueueNotifier> MatchmakingQueueService<R, N> {
     ) -> MatchmakingOutcome {
         let notifier = &self.notifier;
         self.repository.with_state(|q| {
-            let event = queue_execute(q, MatchmakingCommand::PlayerJoin(player_id));
+            let event = q.execute(MatchmakingCommand::PlayerJoin(player_id));
             notifier.broadcast(q.players(), &event);
             event
         })
@@ -32,7 +32,7 @@ impl<R: QueueRepository, N: QueueNotifier> MatchmakingQueueService<R, N> {
     ) -> MatchmakingOutcome {
         let notifier = &self.notifier;
         self.repository.with_state(|q| {
-            let event = queue_execute(q, MatchmakingCommand::PlayerLeave(player_id));
+            let event = q.execute(MatchmakingCommand::PlayerLeave(player_id));
             notifier.broadcast(q.players(), &event);
             event
         })
@@ -41,7 +41,7 @@ impl<R: QueueRepository, N: QueueNotifier> MatchmakingQueueService<R, N> {
     pub fn try_matchmake(&self) -> MatchmakingOutcome {
         let notifier = &self.notifier;
         self.repository.with_state(|q| {
-            let event = queue_execute(q, MatchmakingCommand::TryMatchmake);
+            let event = q.execute(MatchmakingCommand::TryMatchmake);
             notifier.broadcast(q.players(), &event);
             event
         })

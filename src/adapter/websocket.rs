@@ -10,10 +10,7 @@ use tokio::sync::{Mutex as TokioMutex, RwLock};
 
 use crate::application::domain::{GameId, PlayerId};
 use crate::application::ports::in_::GameService;
-use crate::application::ports::out_::{
-    GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, LobbyEventNotifier, LobbyNotification,
-    MatchmakingEventNotifier, MatchmakingNotification,
-};
+use crate::application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
@@ -80,28 +77,6 @@ impl GameEventNotifier for WebSocketAdapter {
         &self,
         player_id: PlayerId,
         notification: GameNotification,
-    ) {
-        let message = serde_json::to_string(&notification).unwrap_or_default();
-        self.send_to_player(player_id, &message).await;
-    }
-}
-
-impl MatchmakingEventNotifier for WebSocketAdapter {
-    async fn notify_player(
-        &self,
-        player_id: PlayerId,
-        notification: MatchmakingNotification,
-    ) {
-        let message = serde_json::to_string(&notification).unwrap_or_default();
-        self.send_to_player(player_id, &message).await;
-    }
-}
-
-impl LobbyEventNotifier for WebSocketAdapter {
-    async fn notify_player(
-        &self,
-        player_id: PlayerId,
-        notification: LobbyNotification,
     ) {
         let message = serde_json::to_string(&notification).unwrap_or_default();
         self.send_to_player(player_id, &message).await;

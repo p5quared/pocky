@@ -25,6 +25,7 @@ pub enum GamePhase {
 #[derive(Clone)]
 pub struct GameConfig {
     pub tick_interval_ms: u64,
+    pub game_duration: u64,
     pub max_price_delta: i32,
     pub starting_price: i32,
 }
@@ -32,7 +33,8 @@ pub struct GameConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
-            tick_interval_ms: 1,
+            tick_interval_ms: 500,
+            game_duration: 360, // 360 ticks = 3 minutes
             max_price_delta: 25,
             starting_price: 100,
         }
@@ -125,23 +127,23 @@ impl GameState {
         self.phase = GamePhase::Running;
         self.current_price = self.config.starting_price;
 
-        let mut effects: Vec<GameEffect> = self
-            .players
-            .iter()
-            .map(|&player_id| GameEffect::Notify {
-                player_id,
-                event: GameEvent::GameStarted {
-                    starting_price: self.current_price,
-                },
-            })
-            .collect();
-
-        effects.push(GameEffect::DelayedAction {
-            delay_ms: self.config.tick_interval_ms,
-            action: GameAction::PriceTick,
+        let started_notifications = self.players.iter().map(|&player_id| GameEffect::Notify {
+            player_id,
+            event: GameEvent::GameStarted {
+                starting_price: self.current_price,
+            },
         });
 
-        Ok(effects)
+        let timed_effects = (1..self.config.game_duration).map(|tick| GameEffect::DelayedAction {
+            delay_ms: tick * self.config.tick_interval_ms,
+            action: if tick == self.config.game_duration - 1 {
+                GameAction::End
+            } else {
+                GameAction::PriceTick
+            },
+        });
+
+        Ok(started_notifications.chain(timed_effects).collect())
     }
 
     fn handle_price_tick(&mut self) -> Result<Vec<GameEffect>, GameError> {
@@ -174,15 +176,10 @@ impl GameState {
             event: GameEvent::AskResolved { player_id, ask_value },
         });
 
-        let mut effects: Vec<GameEffect> = price_notifications
+        let effects: Vec<GameEffect> = price_notifications
             .chain(bid_notifications)
             .chain(ask_notifications)
             .collect();
-
-        effects.push(GameEffect::DelayedAction {
-            delay_ms: self.config.tick_interval_ms,
-            action: GameAction::PriceTick,
-        });
 
         Ok(effects)
     }
@@ -317,6 +314,7 @@ mod tests {
     fn test_config() -> GameConfig {
         GameConfig {
             tick_interval_ms: 1000,
+            game_duration: 10,
             max_price_delta: 10,
             starting_price: 50,
         }
@@ -577,13 +575,6 @@ mod tests {
             e,
             GameEffect::Notify {
                 event: GameEvent::PriceChanged(_),
-                ..
-            }
-        )));
-        assert!(effects.iter().any(|e| matches!(
-            e,
-            GameEffect::DelayedAction {
-                action: GameAction::PriceTick,
                 ..
             }
         )));

@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use crate::application::domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
-use crate::application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
+use crate::application::ports::out_::{
+    GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError,
+};
 
 pub struct GameService<N, R, S> {
     notifier: N,
@@ -97,7 +99,7 @@ where
             return Err(GameServiceError::GameNotFound(game_id));
         };
 
-        let effects = game_state.process_action(GameAction::PriceTick)?;
+        let effects = game_state.process_action(GameAction::Tick)?;
         self.repository.save_game(game_id, &game_state).await;
 
         self.process_effects(game_id, effects).await;

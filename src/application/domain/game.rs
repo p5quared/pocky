@@ -28,6 +28,7 @@ pub struct GameConfig {
     pub game_duration: u64,
     pub max_price_delta: i32,
     pub starting_price: i32,
+    pub countdown_duration_ms: u64,
 }
 
 impl Default for GameConfig {
@@ -37,6 +38,7 @@ impl Default for GameConfig {
             game_duration: 360, // 360 ticks = 3 minutes
             max_price_delta: 25,
             starting_price: 100,
+            countdown_duration_ms: 3000,
         }
     }
 }
@@ -59,8 +61,9 @@ pub struct GameState {
 
 #[derive(Clone, Copy)]
 pub enum GameAction {
+    Countdown(u32),
     Start,
-    PriceTick,
+    Tick,
     Bid { player_id: PlayerId, bid_value: i32 },
     Ask { player_id: PlayerId, ask_value: i32 },
     End,
@@ -68,6 +71,7 @@ pub enum GameAction {
 
 #[derive(Clone, Copy, Serialize)]
 pub enum GameEvent {
+    Countdown(u32),
     GameStarted { starting_price: i32 },
     PriceChanged(i32),
     BidPlaced { player_id: PlayerId, bid_value: i32 },
@@ -89,8 +93,9 @@ impl GameState {
         action: GameAction,
     ) -> Result<Vec<GameEffect>, GameError> {
         match action {
+            GameAction::Countdown(remaining) => self.handle_countdown(remaining),
             GameAction::Start => self.handle_start(),
-            GameAction::PriceTick => self.handle_price_tick(),
+            GameAction::Tick => self.handle_price_tick(),
             GameAction::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
             GameAction::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
             GameAction::End => self.handle_game_end(),
@@ -116,6 +121,44 @@ impl GameState {
         }
     }
 
+    pub fn launch(
+        players: Vec<PlayerId>,
+        starting_balance: i32,
+        config: GameConfig,
+    ) -> (Self, Vec<GameEffect>) {
+        let state = Self::new(players.clone(), starting_balance, config.clone());
+
+        let countdown_seconds = (config.countdown_duration_ms / 1000) as u32;
+
+        let countdown_effects = (1..=countdown_seconds).rev().map(|remaining| {
+            let delay_ms = (countdown_seconds - remaining) as u64 * 1000;
+            GameEffect::DelayedAction {
+                delay_ms,
+                action: GameAction::Countdown(remaining),
+            }
+        });
+
+        let start_effect = GameEffect::DelayedAction {
+            delay_ms: config.countdown_duration_ms,
+            action: GameAction::Start,
+        };
+
+        let effects = countdown_effects.chain(std::iter::once(start_effect)).collect();
+
+        (state, effects)
+    }
+
+    fn handle_countdown(&self, remaining: u32) -> Result<Vec<GameEffect>, GameError> {
+        Ok(self
+            .players
+            .iter()
+            .map(|&player_id| GameEffect::Notify {
+                player_id,
+                event: GameEvent::Countdown(remaining),
+            })
+            .collect())
+    }
+
     fn handle_start(&mut self) -> Result<Vec<GameEffect>, GameError> {
         if self.phase != GamePhase::Pending {
             return Err(GameError::InvalidPhase {
@@ -139,7 +182,7 @@ impl GameState {
             action: if tick == self.config.game_duration - 1 {
                 GameAction::End
             } else {
-                GameAction::PriceTick
+                GameAction::Tick
             },
         });
 
@@ -317,6 +360,7 @@ mod tests {
             game_duration: 10,
             max_price_delta: 10,
             starting_price: 50,
+            countdown_duration_ms: 3000,
         }
     }
 
@@ -554,7 +598,7 @@ mod tests {
             e,
             GameEffect::DelayedAction {
                 delay_ms: 1000,
-                action: GameAction::PriceTick
+                action: GameAction::Tick
             }
         )),);
     }
@@ -564,7 +608,7 @@ mod tests {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let mut engine = create_running_game(vec![p1], 100, 50);
 
-        let effects = engine.process_action(GameAction::PriceTick).unwrap();
+        let effects = engine.process_action(GameAction::Tick).unwrap();
 
         // Price should have changed (within delta range)
         let price_delta = (engine.current_price - 50).abs();
@@ -814,7 +858,7 @@ mod tests {
 
         // Run many ticks to test that price never goes negative
         for _ in 0..100 {
-            engine.process_action(GameAction::PriceTick).unwrap();
+            engine.process_action(GameAction::Tick).unwrap();
             assert!(engine.current_price >= 0, "Price should never be negative");
         }
     }

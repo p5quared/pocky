@@ -1,4 +1,4 @@
-use crate::application::domain::{MatchmakingOutcome, MatchmakingQueue, PlayerId};
+use domain::{MatchmakingOutcome, MatchmakingQueue, PlayerId};
 
 pub trait QueueRepository {
     fn save(

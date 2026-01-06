@@ -8,9 +8,9 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
-use crate::application::domain::{GameId, PlayerId};
-use crate::application::ports::in_::GameService;
-use crate::application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
+use domain::{GameId, PlayerId};
+use application::ports::in_::GameService;
+use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 

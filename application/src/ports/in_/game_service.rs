@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use crate::application::domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
-use crate::application::ports::out_::{
+use domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
+use crate::ports::out_::{
     GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError,
 };
 

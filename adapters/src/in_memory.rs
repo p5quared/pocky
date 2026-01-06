@@ -2,10 +2,8 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use crate::application::{
-    domain::{GameAction, GameId, GameState, PlayerId},
-    ports::out_::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository},
-};
+use domain::{GameAction, GameId, GameState, PlayerId};
+use application::ports::out_::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,

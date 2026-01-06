@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::application::ports::out_::AsyncTimer;
+use application::ports::out_::AsyncTimer;
 
 pub struct TokioTimer;
 

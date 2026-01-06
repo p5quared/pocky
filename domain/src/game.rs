@@ -1,4 +1,4 @@
-use super::PlayerId;
+use crate::PlayerId;
 use rand::Rng;
 use serde::Serialize;
 use thiserror::Error;

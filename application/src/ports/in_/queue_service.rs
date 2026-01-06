@@ -1,7 +1,5 @@
-use crate::application::{
-    domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId},
-    ports::out_::queue::{QueueNotifier, QueueRepository},
-};
+use domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
+use crate::ports::out_::queue::{QueueNotifier, QueueRepository};
 
 pub struct MatchmakingQueueService<R: QueueRepository, N: QueueNotifier> {
     repository: R,

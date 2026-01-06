@@ -1,4 +1,4 @@
-use super::PlayerId;
+use crate::PlayerId;
 
 #[derive(Default)]
 pub struct MatchmakingQueue(Vec<PlayerId>);

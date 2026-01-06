@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::application::domain::{GameAction, GameError, GameEvent, GameId, GameState, PlayerId};
+use domain::{GameAction, GameError, GameEvent, GameId, GameState, PlayerId};
 
 #[derive(Debug)]
 pub enum GameServiceError {

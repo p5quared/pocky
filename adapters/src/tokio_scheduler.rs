@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::application::domain::{GameAction, GameEffect, GameId};
-use crate::application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
+use domain::{GameAction, GameEffect, GameId};
+use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
 
 /// Process a game action: load state, process, save, notify.
 /// Returns the effects for caller to handle (including DelayedAction).

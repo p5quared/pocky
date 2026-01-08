@@ -1,6 +1,6 @@
 use crate::PlayerId;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MatchmakingQueue(Vec<PlayerId>);
 
 impl MatchmakingQueue {
@@ -15,6 +15,7 @@ pub enum MatchmakingCommand {
     TryMatchmake,
 }
 
+#[derive(serde::Serialize, Debug)]
 pub enum MatchmakingOutcome {
     Matched(Vec<PlayerId>),
     Enqueued(PlayerId),
@@ -50,14 +51,12 @@ impl MatchmakingQueue {
                 }
             }
             MatchmakingCommand::TryMatchmake => {
-                let mut events = Vec::new();
-                while self.0.len() >= 2 {
-                    let player1 = self.0.remove(0);
-                    let player2 = self.0.remove(0);
-                    events.push(player1);
-                    events.push(player2);
+                if self.0.len() >= 2 {
+                    let matched = vec![self.0.remove(0), self.0.remove(0)];
+                    MatchmakingOutcome::Matched(matched)
+                } else {
+                    MatchmakingOutcome::Matched(vec![])
                 }
-                MatchmakingOutcome::Matched(events)
             }
         }
     }

@@ -1,43 +1,46 @@
-use domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
-use crate::ports::out_::queue::{QueueNotifier, QueueRepository};
+use std::sync::Arc;
 
-pub struct MatchmakingQueueService<R: QueueRepository, N: QueueNotifier> {
-    repository: R,
-    notifier: N,
+use crate::ports::out_::queue::{QueueNotifier, QueueRepository};
+use domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
+
+pub struct MatchmakingQueueService {
+    repository: Arc<dyn QueueRepository>,
+    notifier: Arc<dyn QueueNotifier>,
 }
 
-impl<R: QueueRepository, N: QueueNotifier> MatchmakingQueueService<R, N> {
+impl MatchmakingQueueService {
     pub fn new(
-        repository: R,
-        notifier: N,
+        repository: Arc<dyn QueueRepository>,
+        notifier: Arc<dyn QueueNotifier>,
     ) -> Self {
         Self { repository, notifier }
     }
 
-    pub fn add_player(
+    pub async fn join_queue(
         &self,
         player_id: PlayerId,
     ) -> MatchmakingOutcome {
-        let mut q = self.repository.load();
+        let mut q = self.repository.load().await;
         let event = q.execute(MatchmakingCommand::PlayerJoin(player_id));
-        self.notifier.broadcast(q.players(), &event);
+        self.repository.save(q.clone()).await;
+        self.notifier.broadcast(q.players(), &event).await;
+        if let MatchmakingOutcome::Matched(players) = q.execute(MatchmakingCommand::TryMatchmake) {
+            let matched = MatchmakingOutcome::Matched(players);
+            self.notifier.broadcast(q.players(), &matched).await;
+            self.repository.save(q).await;
+            return matched;
+        }
+        self.repository.save(q).await;
         event
     }
 
-    pub fn remove_player(
+    pub async fn remove_player(
         &self,
         player_id: PlayerId,
     ) -> MatchmakingOutcome {
-        let mut q = self.repository.load();
+        let mut q = self.repository.load().await;
         let event = q.execute(MatchmakingCommand::PlayerLeave(player_id));
-        self.notifier.broadcast(q.players(), &event);
-        event
-    }
-
-    pub fn try_matchmake(&self) -> MatchmakingOutcome {
-        let mut q = self.repository.load();
-        let event = q.execute(MatchmakingCommand::TryMatchmake);
-        self.notifier.broadcast(q.players(), &event);
+        self.notifier.broadcast(q.players(), &event).await;
         event
     }
 }

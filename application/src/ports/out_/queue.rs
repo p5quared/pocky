@@ -1,15 +1,17 @@
 use domain::{MatchmakingOutcome, MatchmakingQueue, PlayerId};
 
-pub trait QueueRepository {
-    fn save(
+#[async_trait::async_trait]
+pub trait QueueRepository: Send + Sync {
+    async fn save(
         &self,
         queue: MatchmakingQueue,
     );
-    fn load(&self) -> MatchmakingQueue;
+    async fn load(&self) -> MatchmakingQueue;
 }
 
-pub trait QueueNotifier {
-    fn broadcast(
+#[async_trait::async_trait]
+pub trait QueueNotifier: Send + Sync {
+    async fn broadcast(
         &self,
         players: &[PlayerId],
         event: &MatchmakingOutcome,

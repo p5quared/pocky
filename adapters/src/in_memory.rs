@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use domain::{GameAction, GameId, GameState, PlayerId};
+use application::ports::out_::queue::QueueRepository;
 use application::ports::out_::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
+use domain::{GameAction, GameId, GameState, MatchmakingQueue, PlayerId};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,
@@ -68,7 +69,10 @@ impl GameRepository for InMemory {
 
 #[async_trait]
 impl AsyncTimer for InMemory {
-    async fn sleep(&self, _duration: Duration) {
+    async fn sleep(
+        &self,
+        _duration: Duration,
+    ) {
         // No-op for testing - instant return
     }
 }
@@ -82,5 +86,37 @@ impl GameEventScheduler for InMemory {
         action: GameAction,
     ) {
         self.scheduled_actions.write().unwrap().push((game_id, delay, action));
+    }
+}
+
+pub struct InMemoryQueueRepository {
+    queue: RwLock<MatchmakingQueue>,
+}
+
+impl InMemoryQueueRepository {
+    pub fn new() -> Self {
+        Self {
+            queue: RwLock::new(MatchmakingQueue::new()),
+        }
+    }
+}
+
+impl Default for InMemoryQueueRepository {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl QueueRepository for InMemoryQueueRepository {
+    async fn load(&self) -> MatchmakingQueue {
+        self.queue.read().unwrap().clone()
+    }
+
+    async fn save(
+        &self,
+        queue: MatchmakingQueue,
+    ) {
+        *self.queue.write().unwrap() = queue;
     }
 }

@@ -10,9 +10,10 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
-use application::ports::in_::GameService;
+use application::ports::in_::{GameService, MatchmakingQueueService};
+use application::ports::out_::queue::QueueNotifier;
 use application::ports::out_::{GameEventNotifier, GameNotification};
-use domain::{GameId, PlayerId};
+use domain::{GameId, MatchmakingOutcome, PlayerId};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
@@ -28,14 +29,20 @@ pub enum IncomingMessage {
 pub struct AppState {
     pub adapter: Arc<WebSocketAdapter>,
     pub game_service: Arc<TokioMutex<GameService>>,
+    pub matchamaking_service: Arc<TokioMutex<MatchmakingQueueService>>,
 }
 
 impl AppState {
     pub fn new(
         adapter: Arc<WebSocketAdapter>,
         game_service: Arc<TokioMutex<GameService>>,
+        matchamaking_service: Arc<TokioMutex<MatchmakingQueueService>>,
     ) -> Self {
-        Self { adapter, game_service }
+        Self {
+            adapter,
+            game_service,
+            matchamaking_service,
+        }
     }
 }
 
@@ -96,6 +103,33 @@ impl GameEventNotifier for WebSocketAdapter {
     }
 }
 
+pub struct WebSocketQueueNotifier {
+    adapter: Arc<WebSocketAdapter>,
+}
+
+impl WebSocketQueueNotifier {
+    pub fn new(adapter: Arc<WebSocketAdapter>) -> Self {
+        Self { adapter }
+    }
+}
+
+#[async_trait]
+impl QueueNotifier for WebSocketQueueNotifier {
+    async fn broadcast(
+        &self,
+        players: &[PlayerId],
+        event: &MatchmakingOutcome,
+    ) {
+        let message = serde_json::to_string(event).unwrap_or_default();
+        let adapter = self.adapter.clone();
+        let players = players.to_vec();
+
+        for player_id in players {
+            adapter.send_to_player(player_id, &message).await;
+        }
+    }
+}
+
 pub async fn handle_connection(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
@@ -128,8 +162,22 @@ async fn handle_messages(
                     IncomingMessage::PlaceAsk { game_id, value } => {
                         let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
                     }
-                    IncomingMessage::JoinQueue => todo!(),
-                    IncomingMessage::LeaveQueue => todo!(),
+                    IncomingMessage::JoinQueue => {
+                        let matchmaking_s = state.matchamaking_service.lock().await;
+                        let game_s = state.game_service.lock().await;
+                        let outcome = matchmaking_s.join_queue(player_id).await;
+                        match outcome {
+                            MatchmakingOutcome::Matched(players) => {
+                                let _ = game_s.launch_game(players, 100, domain::GameConfig::default()).await;
+                            }
+                            e => {
+                                debug!(player_id = ?player_id, event = ?e, "Player joined queue");
+                            }
+                        }
+                    }
+                    IncomingMessage::LeaveQueue => {
+                        state.matchamaking_service.lock().await.remove_player(player_id).await;
+                    }
                 },
                 Err(e) => {
                     warn!(player_id = ?player_id, error = %e, "Failed to parse message");

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-pub trait AsyncTimer {
-    fn sleep(
-        &self,
-        duration: Duration,
-    ) -> impl Future<Output = ()> + Send;
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait AsyncTimer: Send + Sync {
+    async fn sleep(&self, duration: Duration);
 }

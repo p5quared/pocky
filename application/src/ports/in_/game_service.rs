@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
@@ -5,22 +6,21 @@ use crate::ports::out_::{
     GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError,
 };
 
-pub struct GameService<N, R, S> {
-    notifier: N,
-    repository: R,
-    scheduler: S,
+pub type DynNotifier = Arc<dyn GameEventNotifier>;
+pub type DynRepository = Arc<dyn GameRepository>;
+pub type DynScheduler = Arc<dyn GameEventScheduler>;
+
+pub struct GameService {
+    notifier: DynNotifier,
+    repository: DynRepository,
+    scheduler: DynScheduler,
 }
 
-impl<N, R, S> GameService<N, R, S>
-where
-    N: GameEventNotifier,
-    R: GameRepository,
-    S: GameEventScheduler,
-{
+impl GameService {
     pub fn new(
-        notifier: N,
-        repository: R,
-        scheduler: S,
+        notifier: DynNotifier,
+        repository: DynRepository,
+        scheduler: DynScheduler,
     ) -> Self {
         Self {
             notifier,
@@ -30,7 +30,7 @@ where
     }
 
     pub async fn place_bid(
-        &mut self,
+        &self,
         game_id: GameId,
         player_id: PlayerId,
         bid_value: i32,
@@ -47,7 +47,7 @@ where
     }
 
     pub async fn place_ask(
-        &mut self,
+        &self,
         game_id: GameId,
         player_id: PlayerId,
         ask_value: i32,
@@ -64,7 +64,7 @@ where
     }
 
     pub async fn launch_game(
-        &mut self,
+        &self,
         players: Vec<PlayerId>,
         starting_balance: i32,
         config: GameConfig,
@@ -79,7 +79,7 @@ where
     }
 
     pub async fn process_price_tick(
-        &mut self,
+        &self,
         game_id: GameId,
     ) -> Result<(), GameServiceError> {
         let Some(mut game_state) = self.repository.load_game(game_id).await else {
@@ -95,7 +95,7 @@ where
     }
 
     async fn process_effects(
-        &mut self,
+        &self,
         game_id: GameId,
         effects: Vec<GameEffect>,
     ) {

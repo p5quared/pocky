@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use domain::{GameAction, GameId, GameState, PlayerId};
 use application::ports::out_::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
 
@@ -11,17 +13,8 @@ pub struct InMemory {
     scheduled_actions: RwLock<Vec<(GameId, Duration, GameAction)>>,
 }
 
+#[async_trait]
 impl GameEventNotifier for InMemory {
-    async fn notify_player(
-        &self,
-        player_id: PlayerId,
-        notification: GameNotification,
-    ) {
-        self.game_events.write().unwrap().push((player_id, notification));
-    }
-}
-
-impl GameEventNotifier for &InMemory {
     async fn notify_player(
         &self,
         player_id: PlayerId,
@@ -55,6 +48,7 @@ impl Default for InMemory {
     }
 }
 
+#[async_trait]
 impl GameRepository for InMemory {
     async fn load_game(
         &self,
@@ -72,53 +66,15 @@ impl GameRepository for InMemory {
     }
 }
 
-impl GameRepository for &InMemory {
-    async fn load_game(
-        &self,
-        game_id: GameId,
-    ) -> Option<GameState> {
-        self.games.read().unwrap().get(&game_id).cloned()
-    }
-
-    async fn save_game(
-        &self,
-        game_id: GameId,
-        game_state: &GameState,
-    ) {
-        self.games.write().unwrap().insert(game_id, game_state.clone());
-    }
-}
-
+#[async_trait]
 impl AsyncTimer for InMemory {
-    async fn sleep(
-        &self,
-        _duration: Duration,
-    ) {
+    async fn sleep(&self, _duration: Duration) {
         // No-op for testing - instant return
     }
 }
 
-impl AsyncTimer for &InMemory {
-    async fn sleep(
-        &self,
-        _duration: Duration,
-    ) {
-        // No-op for testing - instant return
-    }
-}
-
+#[async_trait]
 impl GameEventScheduler for InMemory {
-    async fn schedule_action(
-        &self,
-        game_id: GameId,
-        delay: Duration,
-        action: GameAction,
-    ) {
-        self.scheduled_actions.write().unwrap().push((game_id, delay, action));
-    }
-}
-
-impl GameEventScheduler for &InMemory {
     async fn schedule_action(
         &self,
         game_id: GameId,

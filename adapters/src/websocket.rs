@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
@@ -7,10 +8,11 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
+use tracing::{debug, info, warn};
 
-use domain::{GameId, PlayerId};
 use application::ports::in_::GameService;
-use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
+use application::ports::out_::{GameEventNotifier, GameNotification};
+use domain::{GameId, PlayerId};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
@@ -23,9 +25,18 @@ pub enum IncomingMessage {
     LeaveQueue,
 }
 
-pub struct AppState<GN, GR, GS> {
+pub struct AppState {
     pub adapter: Arc<WebSocketAdapter>,
-    pub game_service: Arc<TokioMutex<GameService<GN, GR, GS>>>,
+    pub game_service: Arc<TokioMutex<GameService>>,
+}
+
+impl AppState {
+    pub fn new(
+        adapter: Arc<WebSocketAdapter>,
+        game_service: Arc<TokioMutex<GameService>>,
+    ) -> Self {
+        Self { adapter, game_service }
+    }
 }
 
 pub struct WebSocketAdapter {
@@ -59,6 +70,7 @@ impl WebSocketAdapter {
         player_id: PlayerId,
         message: &str,
     ) {
+        debug!(player_id = ?player_id, message = %message, "-> Sending");
         let connections = self.connections.read().await;
         if let Some((_, sender)) = connections.iter().find(|(pid, _)| *pid == player_id) {
             let _ = sender.lock().await.send(Message::Text(message.into())).await;
@@ -72,6 +84,7 @@ impl Default for WebSocketAdapter {
     }
 }
 
+#[async_trait]
 impl GameEventNotifier for WebSocketAdapter {
     async fn notify_player(
         &self,
@@ -83,50 +96,48 @@ impl GameEventNotifier for WebSocketAdapter {
     }
 }
 
-pub async fn handle_connection<GN, GR, GS, MN, MR, LN, LR>(
+pub async fn handle_connection(
     ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState<GN, GR, GS>>>,
-) -> impl IntoResponse
-where
-    GN: GameEventNotifier + Send + 'static,
-    GR: GameRepository + Send + 'static,
-    GS: GameEventScheduler + Send + 'static,
-{
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
         let player_id = PlayerId::new();
-        let (sender, receiver) = socket.split();
+        info!(player_id = ?player_id, "Player connected");
 
+        let (sender, receiver) = socket.split();
         state.adapter.register_player(player_id, sender).await;
 
         handle_messages(player_id, receiver, state).await;
     })
 }
 
-async fn handle_messages<GN, GR, GS>(
+async fn handle_messages(
     player_id: PlayerId,
     mut receiver: SplitStream<WebSocket>,
-    state: Arc<AppState<GN, GR, GS>>,
-) where
-    GN: GameEventNotifier + Send,
-    GR: GameRepository + Send,
-    GS: GameEventScheduler + Send,
-{
+    state: Arc<AppState>,
+) {
     while let Some(Ok(message)) = receiver.next().await {
-        if let Message::Text(text) = message
-            && let Ok(incoming) = serde_json::from_str::<IncomingMessage>(&text)
-        {
-            match incoming {
-                IncomingMessage::PlaceBid { game_id, value } => {
-                    let _ = state.game_service.lock().await.place_bid(game_id, player_id, value).await;
+        if let Message::Text(text) = message {
+            debug!(player_id = ?player_id, message = %text, "<- Received");
+
+            match serde_json::from_str::<IncomingMessage>(&text) {
+                Ok(incoming) => match incoming {
+                    IncomingMessage::PlaceBid { game_id, value } => {
+                        let _ = state.game_service.lock().await.place_bid(game_id, player_id, value).await;
+                    }
+                    IncomingMessage::PlaceAsk { game_id, value } => {
+                        let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
+                    }
+                    IncomingMessage::JoinQueue => todo!(),
+                    IncomingMessage::LeaveQueue => todo!(),
+                },
+                Err(e) => {
+                    warn!(player_id = ?player_id, error = %e, "Failed to parse message");
                 }
-                IncomingMessage::PlaceAsk { game_id, value } => {
-                    let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
-                }
-                IncomingMessage::JoinQueue => todo!(),
-                IncomingMessage::LeaveQueue => todo!(),
             }
         }
     }
 
+    info!(player_id = ?player_id, "Player disconnected");
     state.adapter.unregister_player(player_id).await;
 }

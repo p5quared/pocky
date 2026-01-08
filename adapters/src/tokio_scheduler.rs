@@ -1,23 +1,23 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+
+use async_trait::async_trait;
 
 use domain::{GameAction, GameEffect, GameId};
 use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
 
+/// Type aliases for the dynamic trait objects
+pub type DynNotifier = Arc<dyn GameEventNotifier>;
+pub type DynRepository = Arc<dyn GameRepository>;
+
 /// Process a game action: load state, process, save, notify.
 /// Returns the effects for caller to handle (including DelayedAction).
-pub async fn process_game_action<N, R>(
-    notifier: &N,
-    repository: &R,
+pub async fn process_game_action(
+    notifier: &dyn GameEventNotifier,
+    repository: &dyn GameRepository,
     game_id: GameId,
     action: GameAction,
-) -> Result<Vec<GameEffect>, GameServiceError>
-where
-    N: GameEventNotifier,
-    R: GameRepository,
-{
+) -> Result<Vec<GameEffect>, GameServiceError> {
     let Some(mut game_state) = repository.load_game(game_id).await else {
         return Err(GameServiceError::GameNotFound(game_id));
     };
@@ -35,16 +35,12 @@ where
 }
 
 /// Execute a scheduled action and spawn tasks for any resulting DelayedAction effects.
-fn execute_and_reschedule<N, R>(
-    notifier: Arc<N>,
-    repository: Arc<R>,
+fn execute_and_reschedule(
+    notifier: DynNotifier,
+    repository: DynRepository,
     game_id: GameId,
     action: GameAction,
-) -> Pin<Box<dyn Future<Output = ()> + Send>>
-where
-    N: GameEventNotifier + Send + Sync + 'static,
-    R: GameRepository + Send + Sync + 'static,
-{
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async move {
         let result = process_game_action(notifier.as_ref(), repository.as_ref(), game_id, action).await;
 
@@ -63,49 +59,22 @@ where
     })
 }
 
-pub struct TokioGameScheduler<N, R> {
-    notifier: Arc<N>,
-    repository: Arc<R>,
+pub struct TokioGameScheduler {
+    notifier: DynNotifier,
+    repository: DynRepository,
 }
 
-impl<N, R> TokioGameScheduler<N, R>
-where
-    N: GameEventNotifier + Send + Sync + 'static,
-    R: GameRepository + Send + Sync + 'static,
-{
+impl TokioGameScheduler {
     pub fn new(
-        notifier: Arc<N>,
-        repository: Arc<R>,
+        notifier: DynNotifier,
+        repository: DynRepository,
     ) -> Self {
         Self { notifier, repository }
     }
 }
 
-impl<N, R> GameEventScheduler for TokioGameScheduler<N, R>
-where
-    N: GameEventNotifier + Send + Sync + 'static,
-    R: GameRepository + Send + Sync + 'static,
-{
-    async fn schedule_action(
-        &self,
-        game_id: GameId,
-        delay: Duration,
-        action: GameAction,
-    ) {
-        let notifier = Arc::clone(&self.notifier);
-        let repository = Arc::clone(&self.repository);
-        tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
-            execute_and_reschedule(notifier, repository, game_id, action).await;
-        });
-    }
-}
-
-impl<N, R> GameEventScheduler for &TokioGameScheduler<N, R>
-where
-    N: GameEventNotifier + Send + Sync + 'static,
-    R: GameRepository + Send + Sync + 'static,
-{
+#[async_trait]
+impl GameEventScheduler for TokioGameScheduler {
     async fn schedule_action(
         &self,
         game_id: GameId,

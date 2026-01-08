@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use application::ports::out_::AsyncTimer;
 
 pub struct TokioTimer;
@@ -16,11 +18,9 @@ impl Default for TokioTimer {
     }
 }
 
+#[async_trait]
 impl AsyncTimer for TokioTimer {
-    async fn sleep(
-        &self,
-        duration: Duration,
-    ) {
+    async fn sleep(&self, duration: Duration) {
         tokio::time::sleep(duration).await;
     }
 }

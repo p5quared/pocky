@@ -76,8 +76,8 @@ pub enum GameEvent {
     PriceChanged(i32),
     BidPlaced { player_id: PlayerId, bid_value: i32 },
     AskPlaced { player_id: PlayerId, ask_value: i32 },
-    BidResolved { player_id: PlayerId, bid_value: i32 },
-    AskResolved { player_id: PlayerId, ask_value: i32 },
+    BidFilled { player_id: PlayerId, bid_value: i32 },
+    AskFilled { player_id: PlayerId, ask_value: i32 },
     GameEnded,
 }
 
@@ -214,12 +214,12 @@ impl GameState {
 
         let bid_notifications = resolved_bids.into_iter().map(|(player_id, bid_value)| GameEffect::Notify {
             player_id,
-            event: GameEvent::BidResolved { player_id, bid_value },
+            event: GameEvent::BidFilled { player_id, bid_value },
         });
 
         let ask_notifications = resolved_asks.into_iter().map(|(player_id, ask_value)| GameEffect::Notify {
             player_id,
-            event: GameEvent::AskResolved { player_id, ask_value },
+            event: GameEvent::AskFilled { player_id, ask_value },
         });
 
         let effects: Vec<GameEffect> = price_notifications

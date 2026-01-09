@@ -27,14 +27,14 @@ pub enum IncomingMessage {
 }
 
 pub struct AppState {
-    pub adapter: Arc<WebSocketAdapter>,
+    pub adapter: Arc<WebSocketNotifier>,
     pub game_service: Arc<TokioMutex<GameService>>,
     pub matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
 }
 
 impl AppState {
     pub fn new(
-        adapter: Arc<WebSocketAdapter>,
+        adapter: Arc<WebSocketNotifier>,
         game_service: Arc<TokioMutex<GameService>>,
         matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
     ) -> Self {
@@ -46,11 +46,11 @@ impl AppState {
     }
 }
 
-pub struct WebSocketAdapter {
+pub struct WebSocketNotifier {
     connections: RwLock<Vec<(PlayerId, TokioMutex<WebSocketSender>)>>,
 }
 
-impl WebSocketAdapter {
+impl WebSocketNotifier {
     pub fn new() -> Self {
         Self {
             connections: RwLock::new(Vec::new()),
@@ -85,14 +85,14 @@ impl WebSocketAdapter {
     }
 }
 
-impl Default for WebSocketAdapter {
+impl Default for WebSocketNotifier {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl GameEventNotifier for WebSocketAdapter {
+impl GameEventNotifier for WebSocketNotifier {
     async fn notify_player(
         &self,
         player_id: PlayerId,
@@ -104,11 +104,11 @@ impl GameEventNotifier for WebSocketAdapter {
 }
 
 pub struct WebSocketQueueNotifier {
-    adapter: Arc<WebSocketAdapter>,
+    adapter: Arc<WebSocketNotifier>,
 }
 
 impl WebSocketQueueNotifier {
-    pub fn new(adapter: Arc<WebSocketAdapter>) -> Self {
+    pub fn new(adapter: Arc<WebSocketNotifier>) -> Self {
         Self { adapter }
     }
 }

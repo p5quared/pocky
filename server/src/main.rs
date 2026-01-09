@@ -5,7 +5,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 
 use adapters::{
-    AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketNotifier, WebSocketQueueNotifier,
+    AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketNotifier,
     handle_connection,
 };
 use application::ports::in_::{GameService, MatchmakingService};
@@ -30,7 +30,7 @@ async fn main() {
 
     // Matchmaking service dependencies
     let queue_repo: Arc<dyn QueueRepository> = Arc::new(InMemoryQueueRepository::new());
-    let queue_notifier: Arc<dyn QueueNotifier> = Arc::new(WebSocketQueueNotifier::new(ws_adapter.clone()));
+    let queue_notifier: Arc<dyn QueueNotifier> = ws_adapter.clone();
 
     let matchmaking_service = MatchmakingService::new(queue_repo, queue_notifier);
 

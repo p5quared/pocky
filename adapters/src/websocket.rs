@@ -103,29 +103,16 @@ impl GameEventNotifier for WebSocketNotifier {
     }
 }
 
-pub struct WebSocketQueueNotifier {
-    adapter: Arc<WebSocketNotifier>,
-}
-
-impl WebSocketQueueNotifier {
-    pub fn new(adapter: Arc<WebSocketNotifier>) -> Self {
-        Self { adapter }
-    }
-}
-
 #[async_trait]
-impl QueueNotifier for WebSocketQueueNotifier {
+impl QueueNotifier for WebSocketNotifier {
     async fn broadcast(
         &self,
         players: &[PlayerId],
         event: &MatchmakingOutcome,
     ) {
         let message = serde_json::to_string(event).unwrap_or_default();
-        let adapter = self.adapter.clone();
-        let players = players.to_vec();
-
         for player_id in players {
-            adapter.send_to_player(player_id, &message).await;
+            self.send_to_player(*player_id, &message).await;
         }
     }
 }

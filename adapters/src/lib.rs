@@ -6,4 +6,4 @@ mod websocket;
 pub use in_memory::{InMemory, InMemoryQueueRepository};
 pub use tokio_scheduler::{DynNotifier, DynRepository, TokioGameScheduler, process_game_action};
 pub use tokio_timer::TokioTimer;
-pub use websocket::{AppState, IncomingMessage, WebSocketNotifier, WebSocketQueueNotifier, handle_connection};
+pub use websocket::{AppState, IncomingMessage, WebSocketNotifier, handle_connection};

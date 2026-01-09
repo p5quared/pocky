@@ -3,12 +3,12 @@ use std::sync::Arc;
 use crate::ports::out_::queue::{QueueNotifier, QueueRepository};
 use domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
 
-pub struct MatchmakingQueueService {
+pub struct MatchmakingService {
     repository: Arc<dyn QueueRepository>,
     notifier: Arc<dyn QueueNotifier>,
 }
 
-impl MatchmakingQueueService {
+impl MatchmakingService {
     pub fn new(
         repository: Arc<dyn QueueRepository>,
         notifier: Arc<dyn QueueNotifier>,

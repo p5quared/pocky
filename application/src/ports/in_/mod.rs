@@ -1,5 +1,5 @@
 mod game_service;
-mod queue_service;
+mod matchmaking_service;
 
 pub use game_service::GameService;
-pub use queue_service::MatchmakingQueueService;
+pub use matchmaking_service::MatchmakingService;

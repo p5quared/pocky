@@ -8,7 +8,7 @@ use adapters::{
     AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketAdapter, WebSocketQueueNotifier,
     handle_connection,
 };
-use application::ports::in_::{GameService, MatchmakingQueueService};
+use application::ports::in_::{GameService, MatchmakingService};
 use application::ports::out_::queue::{QueueNotifier, QueueRepository};
 use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameRepository};
 
@@ -32,7 +32,7 @@ async fn main() {
     let queue_repo: Arc<dyn QueueRepository> = Arc::new(InMemoryQueueRepository::new());
     let queue_notifier: Arc<dyn QueueNotifier> = Arc::new(WebSocketQueueNotifier::new(ws_adapter.clone()));
 
-    let matchmaking_service = MatchmakingQueueService::new(queue_repo, queue_notifier);
+    let matchmaking_service = MatchmakingService::new(queue_repo, queue_notifier);
 
     let app_state = Arc::new(AppState::new(
         ws_adapter,

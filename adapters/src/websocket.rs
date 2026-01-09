@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
-use application::ports::in_::{GameService, MatchmakingQueueService};
+use application::ports::in_::{GameService, MatchmakingService};
 use application::ports::out_::queue::QueueNotifier;
 use application::ports::out_::{GameEventNotifier, GameNotification};
 use domain::{GameId, MatchmakingOutcome, PlayerId};
@@ -18,25 +18,25 @@ use domain::{GameId, MatchmakingOutcome, PlayerId};
 type WebSocketSender = SplitSink<WebSocket, Message>;
 
 #[derive(Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum IncomingMessage {
-    PlaceBid { game_id: GameId, value: i32 },
-    PlaceAsk { game_id: GameId, value: i32 },
     JoinQueue,
     LeaveQueue,
+    PlaceBid { game_id: GameId, value: i32 },
+    PlaceAsk { game_id: GameId, value: i32 },
 }
 
 pub struct AppState {
     pub adapter: Arc<WebSocketAdapter>,
     pub game_service: Arc<TokioMutex<GameService>>,
-    pub matchamaking_service: Arc<TokioMutex<MatchmakingQueueService>>,
+    pub matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
 }
 
 impl AppState {
     pub fn new(
         adapter: Arc<WebSocketAdapter>,
         game_service: Arc<TokioMutex<GameService>>,
-        matchamaking_service: Arc<TokioMutex<MatchmakingQueueService>>,
+        matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
     ) -> Self {
         Self {
             adapter,

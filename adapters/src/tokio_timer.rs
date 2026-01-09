@@ -20,7 +20,10 @@ impl Default for TokioTimer {
 
 #[async_trait]
 impl AsyncTimer for TokioTimer {
-    async fn sleep(&self, duration: Duration) {
+    async fn sleep(
+        &self,
+        duration: Duration,
+    ) {
         tokio::time::sleep(duration).await;
     }
 }

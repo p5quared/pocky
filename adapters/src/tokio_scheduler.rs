@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use domain::{GameAction, GameEffect, GameId};
 use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
+use domain::{GameAction, GameEffect, GameId};
 
 /// Type aliases for the dynamic trait objects
 pub type DynNotifier = Arc<dyn GameEventNotifier>;

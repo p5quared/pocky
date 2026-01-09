@@ -1,10 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
 use domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
-use crate::ports::out_::{
-    GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError,
-};
 
 pub type DynNotifier = Arc<dyn GameEventNotifier>;
 pub type DynRepository = Arc<dyn GameRepository>;

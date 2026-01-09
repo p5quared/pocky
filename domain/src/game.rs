@@ -148,7 +148,10 @@ impl GameState {
         (state, effects)
     }
 
-    fn handle_countdown(&self, remaining: u32) -> Result<Vec<GameEffect>, GameError> {
+    fn handle_countdown(
+        &self,
+        remaining: u32,
+    ) -> Result<Vec<GameEffect>, GameError> {
         Ok(self
             .players
             .iter()

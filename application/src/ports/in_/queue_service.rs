@@ -22,11 +22,13 @@ impl MatchmakingQueueService {
     ) -> MatchmakingOutcome {
         let mut q = self.repository.load().await;
         let event = q.execute(MatchmakingCommand::PlayerJoin(player_id));
-        self.repository.save(q.clone()).await;
-        self.notifier.broadcast(q.players(), &event).await;
-        if let MatchmakingOutcome::Matched(players) = q.execute(MatchmakingCommand::TryMatchmake) {
+        let players_before_matchmaking = q.players().clone();
+        self.notifier.broadcast(&players_before_matchmaking, &event).await;
+        if let MatchmakingOutcome::Matched(players) = q.execute(MatchmakingCommand::TryMatchmake)
+            && players.len() > 0
+        {
             let matched = MatchmakingOutcome::Matched(players);
-            self.notifier.broadcast(q.players(), &matched).await;
+            self.notifier.broadcast(&players_before_matchmaking, &matched).await;
             self.repository.save(q).await;
             return matched;
         }

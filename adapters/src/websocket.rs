@@ -50,6 +50,7 @@ pub struct WebSocketNotifier {
 }
 
 impl WebSocketNotifier {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             connections: RwLock::new(Vec::new()),

@@ -104,6 +104,7 @@ impl GameState {
 }
 
 impl GameState {
+    #[must_use] 
     pub fn new(
         players: Vec<PlayerId>,
         starting_balance: i32,
@@ -121,6 +122,7 @@ impl GameState {
         }
     }
 
+    #[must_use] 
     pub fn launch(
         players: Vec<PlayerId>,
         starting_balance: i32,
@@ -131,7 +133,7 @@ impl GameState {
         let countdown_seconds = (config.countdown_duration_ms / 1000) as u32;
 
         let countdown_effects = (1..=countdown_seconds).rev().map(|remaining| {
-            let delay_ms = (countdown_seconds - remaining) as u64 * 1000;
+            let delay_ms = u64::from(countdown_seconds - remaining) * 1000;
             GameEffect::DelayedAction {
                 delay_ms,
                 action: GameAction::Countdown(remaining),

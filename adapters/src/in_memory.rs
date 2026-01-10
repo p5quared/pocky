@@ -27,6 +27,7 @@ impl GameEventNotifier for InMemory {
 }
 
 impl InMemory {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             games: RwLock::new(HashMap::new()),
@@ -95,6 +96,7 @@ pub struct InMemoryQueueRepository {
 }
 
 impl InMemoryQueueRepository {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             queue: RwLock::new(MatchmakingQueue::new()),

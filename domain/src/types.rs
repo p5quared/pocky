@@ -10,6 +10,7 @@ impl Default for PlayerId {
 }
 
 impl PlayerId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
     }
@@ -19,6 +20,7 @@ impl PlayerId {
 pub struct GameId(pub uuid::Uuid);
 
 impl GameId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
     }
@@ -34,6 +36,7 @@ impl Default for GameId {
 pub struct LobbyId(pub uuid::Uuid);
 
 impl LobbyId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4())
     }

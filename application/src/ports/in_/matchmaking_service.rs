@@ -25,7 +25,7 @@ impl MatchmakingService {
         let players_before_matchmaking = q.players().clone();
         self.notifier.broadcast(&players_before_matchmaking, &event).await;
         if let MatchmakingOutcome::Matched(players) = q.execute(MatchmakingCommand::TryMatchmake)
-            && players.len() > 0
+            && !players.is_empty()
         {
             let matched = MatchmakingOutcome::Matched(players);
             self.notifier.broadcast(&players_before_matchmaking, &matched).await;

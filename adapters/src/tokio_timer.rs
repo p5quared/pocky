@@ -7,6 +7,7 @@ use application::ports::out_::AsyncTimer;
 pub struct TokioTimer;
 
 impl TokioTimer {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

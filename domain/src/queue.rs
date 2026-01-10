@@ -4,6 +4,7 @@ use crate::PlayerId;
 pub struct MatchmakingQueue(Vec<PlayerId>);
 
 impl MatchmakingQueue {
+    #[must_use] 
     pub fn players(&self) -> &Vec<PlayerId> {
         &self.0
     }
@@ -25,6 +26,7 @@ pub enum MatchmakingOutcome {
 }
 
 impl MatchmakingQueue {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }
@@ -35,11 +37,11 @@ impl MatchmakingQueue {
     ) -> MatchmakingOutcome {
         match command {
             MatchmakingCommand::PlayerJoin(player_id) => {
-                if !self.0.contains(&player_id) {
+                if self.0.contains(&player_id) {
+                    MatchmakingOutcome::AlreadyQueued
+                } else {
                     self.0.push(player_id);
                     MatchmakingOutcome::Enqueued(player_id)
-                } else {
-                    MatchmakingOutcome::AlreadyQueued
                 }
             }
             MatchmakingCommand::PlayerLeave(player_id) => {

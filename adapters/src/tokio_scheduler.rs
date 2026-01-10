@@ -11,7 +11,7 @@ pub type DynNotifier = Arc<dyn GameEventNotifier>;
 pub type DynRepository = Arc<dyn GameRepository>;
 
 /// Process a game action: load state, process, save, notify.
-/// Returns the effects for caller to handle (including DelayedAction).
+/// Returns the effects for caller to handle (including `DelayedAction`).
 pub async fn process_game_action(
     notifier: &dyn GameEventNotifier,
     repository: &dyn GameRepository,
@@ -34,7 +34,7 @@ pub async fn process_game_action(
     Ok(effects)
 }
 
-/// Execute a scheduled action and spawn tasks for any resulting DelayedAction effects.
+/// Execute a scheduled action and spawn tasks for any resulting `DelayedAction` effects.
 fn execute_and_reschedule(
     notifier: DynNotifier,
     repository: DynRepository,

@@ -64,11 +64,10 @@ impl GameService {
     pub async fn launch_game(
         &self,
         players: Vec<PlayerId>,
-        starting_balance: i32,
         config: GameConfig,
     ) -> Result<GameId, GameServiceError> {
         let game_id = GameId::new();
-        let (game_state, effects) = GameState::launch(players, starting_balance, config);
+        let (game_state, effects) = GameState::launch(players, config);
 
         self.repository.save_game(game_id, &game_state).await;
         self.process_effects(game_id, effects).await;

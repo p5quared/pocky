@@ -29,6 +29,7 @@ pub struct GameConfig {
     pub max_price_delta: i32,
     pub starting_price: i32,
     pub countdown_duration_ms: u64,
+    pub starting_balance: i32,
 }
 
 impl Default for GameConfig {
@@ -39,6 +40,7 @@ impl Default for GameConfig {
             max_price_delta: 25,
             starting_price: 100,
             countdown_duration_ms: 3000,
+            starting_balance: 1000,
         }
     }
 }
@@ -104,12 +106,12 @@ impl GameState {
 }
 
 impl GameState {
-    #[must_use] 
+    #[must_use]
     pub fn new(
         players: Vec<PlayerId>,
-        starting_balance: i32,
         config: GameConfig,
     ) -> Self {
+        let starting_balance = config.starting_balance;
         Self {
             phase: GamePhase::Pending,
             config,
@@ -122,13 +124,12 @@ impl GameState {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn launch(
         players: Vec<PlayerId>,
-        starting_balance: i32,
         config: GameConfig,
     ) -> (Self, Vec<GameEffect>) {
-        let state = Self::new(players.clone(), starting_balance, config.clone());
+        let state = Self::new(players.clone(), config.clone());
 
         let countdown_seconds = (config.countdown_duration_ms / 1000) as u32;
 
@@ -366,18 +367,18 @@ mod tests {
             max_price_delta: 10,
             starting_price: 50,
             countdown_duration_ms: 3000,
+            starting_balance: 100,
         }
     }
 
     /// Create a game already in Running state at the given price
     fn create_running_game(
         players: Vec<PlayerId>,
-        starting_balance: i32,
         price: i32,
     ) -> GameState {
         let mut config = test_config();
         config.starting_price = price;
-        let mut game = GameState::new(players, starting_balance, config);
+        let mut game = GameState::new(players, config);
         game.process_action(GameAction::Start).unwrap();
         game
     }
@@ -480,7 +481,7 @@ mod tests {
     fn test_transactions() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 0 so bids don't immediately resolve
-        let mut engine = create_running_game(vec![p], 100, 0);
+        let mut engine = create_running_game(vec![p], 0);
         engine
             .process_action(GameAction::Bid {
                 player_id: p,
@@ -532,7 +533,7 @@ mod tests {
     fn test_bid_insufficient_funds() {
         let valid_player = PlayerId(uuid::Uuid::new_v4());
         let invalid_player = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![valid_player], 100, 50);
+        let mut engine = create_running_game(vec![valid_player], 50);
 
         // Player not in game has 0 balance
         let result = engine.process_action(GameAction::Bid {
@@ -552,7 +553,7 @@ mod tests {
     #[test]
     fn test_ask_insufficient_shares() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p], 100, 50);
+        let mut engine = create_running_game(vec![p], 50);
 
         // No shares owned, ask should return error
         let result = engine.process_action(GameAction::Ask {
@@ -575,7 +576,7 @@ mod tests {
         let p2 = PlayerId(uuid::Uuid::new_v4());
         let mut config = test_config();
         config.starting_price = 50;
-        let mut engine = GameState::new(vec![p1, p2], 100, config);
+        let mut engine = GameState::new(vec![p1, p2], config);
 
         assert_eq!(engine.phase, GamePhase::Pending);
 
@@ -611,7 +612,7 @@ mod tests {
     #[test]
     fn test_price_tick() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1], 100, 50);
+        let mut engine = create_running_game(vec![p1], 50);
 
         let effects = engine.process_action(GameAction::Tick).unwrap();
 
@@ -633,7 +634,7 @@ mod tests {
     fn test_bid_resolved_notifications() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 0 so the bid doesn't immediately resolve
-        let mut engine = create_running_game(vec![p], 100, 0);
+        let mut engine = create_running_game(vec![p], 0);
 
         engine
             .process_action(GameAction::Bid {
@@ -655,7 +656,7 @@ mod tests {
     fn test_ask_resolved_notifications() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p], 100, 50);
+        let mut engine = create_running_game(vec![p], 50);
 
         // Buy a share first
         engine
@@ -689,7 +690,7 @@ mod tests {
     fn test_bid_placed_notifications() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1, p2], 100, 50);
+        let mut engine = create_running_game(vec![p1, p2], 50);
 
         let effects = engine
             .process_action(GameAction::Bid {
@@ -723,7 +724,7 @@ mod tests {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
         // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p1, p2], 100, 50);
+        let mut engine = create_running_game(vec![p1, p2], 50);
 
         // p1 needs to own a share first
         engine
@@ -765,7 +766,7 @@ mod tests {
     fn test_game_end_notifications() {
         let p1 = PlayerId(uuid::Uuid::new_v4());
         let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1, p2], 100, 50);
+        let mut engine = create_running_game(vec![p1, p2], 50);
 
         let effects = engine.process_action(GameAction::End).unwrap();
 
@@ -789,7 +790,7 @@ mod tests {
     fn test_ask_error_when_insufficient_shares() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p], 100, 50);
+        let mut engine = create_running_game(vec![p], 50);
 
         // Buy one share
         engine
@@ -838,7 +839,7 @@ mod tests {
     #[test]
     fn test_bid_error_when_not_running() {
         let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::new(vec![p], 100, test_config());
+        let mut engine = GameState::new(vec![p], test_config());
 
         // Game is in Pending state, bid should return InvalidPhase error
         let result = engine.process_action(GameAction::Bid {
@@ -859,7 +860,7 @@ mod tests {
     fn test_price_stays_non_negative() {
         let p = PlayerId(uuid::Uuid::new_v4());
         // Start at price 0
-        let mut engine = create_running_game(vec![p], 100, 0);
+        let mut engine = create_running_game(vec![p], 0);
 
         // Run many ticks to test that price never goes negative
         for _ in 0..100 {

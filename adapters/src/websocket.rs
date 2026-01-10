@@ -155,7 +155,7 @@ async fn handle_messages(
                         let outcome = matchmaking_s.join_queue(player_id).await;
                         match outcome {
                             MatchmakingOutcome::Matched(players) => {
-                                let _ = game_s.launch_game(players, 100, domain::GameConfig::default()).await;
+                                let _ = game_s.launch_game(players, domain::GameConfig::default()).await;
                             }
                             e => {
                                 debug!(player_id = ?player_id, event = ?e, "Player joined queue");

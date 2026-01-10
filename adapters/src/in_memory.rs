@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use application::ports::out_::queue::QueueRepository;
-use application::ports::out_::{AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository};
+use application::ports::out_::{
+    AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, QueueRepository,
+};
 use domain::{GameAction, GameId, GameState, MatchmakingQueue, PlayerId};
 
 pub struct InMemory {

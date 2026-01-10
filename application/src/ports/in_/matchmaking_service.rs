@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ports::out_::queue::{QueueNotifier, QueueRepository};
+use crate::ports::out_::{QueueNotifier, QueueRepository};
 use domain::{MatchmakingCommand, MatchmakingOutcome, PlayerId};
 
 pub struct MatchmakingService {

@@ -4,13 +4,9 @@ use axum::{Router, routing::get};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 
-use adapters::{
-    AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketNotifier,
-    handle_connection,
-};
+use adapters::{AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketNotifier, handle_connection};
 use application::ports::in_::{GameService, MatchmakingService};
-use application::ports::out_::queue::{QueueNotifier, QueueRepository};
-use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameRepository};
+use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameRepository, QueueNotifier, QueueRepository};
 
 #[tokio::main]
 async fn main() {

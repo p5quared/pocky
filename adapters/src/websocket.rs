@@ -11,8 +11,7 @@ use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
 use application::ports::in_::{GameService, MatchmakingService};
-use application::ports::out_::queue::QueueNotifier;
-use application::ports::out_::{GameEventNotifier, GameNotification};
+use application::ports::out_::{GameEventNotifier, GameNotification, QueueNotifier};
 use domain::{GameId, MatchmakingOutcome, PlayerId};
 
 type WebSocketSender = SplitSink<WebSocket, Message>;

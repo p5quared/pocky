@@ -1,6 +1,7 @@
 use crate::PlayerId;
 use rand::Rng;
 use serde::Serialize;
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
@@ -45,20 +46,47 @@ impl Default for GameConfig {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PlayerState {
+    cash: i32,
+    shares: Vec<i32>,
+    pending_bids: Vec<i32>,
+    pending_asks: Vec<i32>,
+}
+
+impl PlayerState {
+    fn new(starting_cash: i32) -> Self {
+        Self {
+            cash: starting_cash,
+            shares: Vec::new(),
+            pending_bids: Vec::new(),
+            pending_asks: Vec::new(),
+        }
+    }
+
+    fn available_cash(&self) -> i32 {
+        self.cash - self.pending_bids.iter().sum::<i32>()
+    }
+
+    fn available_shares(&self) -> usize {
+        self.shares.len().saturating_sub(self.pending_asks.len())
+    }
+
+    #[allow(dead_code)]
+    fn net_worth(
+        &self,
+        current_price: i32,
+    ) -> i32 {
+        self.cash + (self.shares.len() as i32 * current_price)
+    }
+}
+
 #[derive(Clone)]
 pub struct GameState {
     phase: GamePhase,
     config: GameConfig,
     current_price: i32,
-    players: Vec<PlayerId>,
-
-    // (player_id, amount)
-    cash_transactions: Vec<(PlayerId, i32)>,
-    // (player_id, share_value)
-    share_transactions: Vec<(PlayerId, i32)>,
-
-    open_bids: Vec<(PlayerId, i32)>,
-    open_asks: Vec<(PlayerId, i32)>,
+    players: HashMap<PlayerId, PlayerState>,
 }
 
 #[derive(Clone, Copy)]
@@ -112,14 +140,14 @@ impl GameState {
         config: GameConfig,
     ) -> Self {
         let starting_balance = config.starting_balance;
+        let players = players
+            .into_iter()
+            .map(|pid| (pid, PlayerState::new(starting_balance)))
+            .collect();
         Self {
             phase: GamePhase::Pending,
             config,
-            cash_transactions: players.clone().into_iter().map(|pid| (pid, starting_balance)).collect(),
             players,
-            share_transactions: Vec::new(),
-            open_bids: Vec::new(),
-            open_asks: Vec::new(),
             current_price: 0,
         }
     }
@@ -157,7 +185,7 @@ impl GameState {
     ) -> Result<Vec<GameEffect>, GameError> {
         Ok(self
             .players
-            .iter()
+            .keys()
             .map(|&player_id| GameEffect::Notify {
                 player_id,
                 event: GameEvent::Countdown(remaining),
@@ -176,7 +204,7 @@ impl GameState {
         self.phase = GamePhase::Running;
         self.current_price = self.config.starting_price;
 
-        let started_notifications = self.players.iter().map(|&player_id| GameEffect::Notify {
+        let started_notifications = self.players.keys().map(|&player_id| GameEffect::Notify {
             player_id,
             event: GameEvent::GameStarted {
                 starting_price: self.current_price,
@@ -210,7 +238,7 @@ impl GameState {
         let resolved_bids = self.resolve_bids();
         let resolved_asks = self.resolve_asks();
 
-        let price_notifications = self.players.iter().map(|&player_id| GameEffect::Notify {
+        let price_notifications = self.players.keys().map(|&player_id| GameEffect::Notify {
             player_id,
             event: GameEvent::PriceChanged(self.current_price),
         });
@@ -244,7 +272,7 @@ impl GameState {
 
         Ok(self
             .players
-            .iter()
+            .keys()
             .map(|&player_id| GameEffect::Notify {
                 player_id,
                 event: GameEvent::GameEnded,
@@ -253,25 +281,27 @@ impl GameState {
     }
 
     fn resolve_bids(&mut self) -> Vec<(PlayerId, i32)> {
-        self.open_bids
-            .extract_if(.., |&mut (_, v)| v >= self.current_price)
-            .map(|(player_id, bid_value)| {
-                self.share_transactions.push((player_id, self.current_price));
-                self.cash_transactions.push((player_id, bid_value - self.current_price));
-                (player_id, bid_value)
-            })
-            .collect()
-    }
+        let current_price = self.current_price;
+        let mut resolved = Vec::new();
 
-    fn get_cash_balance(
-        &self,
-        player_id: PlayerId,
-    ) -> i32 {
-        self.cash_transactions
-            .iter()
-            .filter(|(pid, _)| *pid == player_id)
-            .map(|(_, balance)| balance)
-            .sum()
+        for (player_id, state) in &mut self.players {
+            let filled_indices: Vec<usize> = state
+                .pending_bids
+                .iter()
+                .enumerate()
+                .filter(|(_, bid)| **bid >= current_price)
+                .map(|(i, _)| i)
+                .collect();
+
+            for i in filled_indices.into_iter().rev() {
+                let bid_value = state.pending_bids.remove(i);
+                state.shares.push(current_price);
+                state.cash -= current_price;
+                resolved.push((*player_id, bid_value));
+            }
+        }
+
+        resolved
     }
 
     fn handle_bid(
@@ -286,20 +316,23 @@ impl GameState {
             });
         }
 
-        let balance = self.get_cash_balance(player_id);
-        if bid_value > balance {
+        let state = self.players.get(&player_id);
+        let available_player_balance = state.map(|s| s.available_cash()).unwrap_or(0);
+
+        if bid_value > available_player_balance {
             return Err(GameError::InsufficientFunds {
-                available: balance,
+                available: available_player_balance,
                 required: bid_value,
             });
         }
 
-        self.cash_transactions.push((player_id, -bid_value));
-        self.open_bids.push((player_id, bid_value));
+        if let Some(state) = self.players.get_mut(&player_id) {
+            state.pending_bids.push(bid_value);
+        }
 
         Ok(self
             .players
-            .iter()
+            .keys()
             .map(|&pid| GameEffect::Notify {
                 player_id: pid,
                 event: GameEvent::BidPlaced { player_id, bid_value },
@@ -319,21 +352,23 @@ impl GameState {
             });
         }
 
-        let owned_count = self.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
-        let asking_count = self.open_asks.iter().filter(|(pid, _)| *pid == player_id).count();
+        let state = self.players.get(&player_id);
+        let player_shares_available = state.map(|s| s.available_shares()).unwrap_or(0);
 
-        if owned_count <= asking_count {
+        if player_shares_available == 0 {
             return Err(GameError::InsufficientShares {
-                available: owned_count.saturating_sub(asking_count),
+                available: player_shares_available,
                 required: 1,
             });
         }
 
-        self.open_asks.push((player_id, ask_value));
+        if let Some(state) = self.players.get_mut(&player_id) {
+            state.pending_asks.push(ask_value);
+        }
 
         Ok(self
             .players
-            .iter()
+            .keys()
             .map(|&pid| GameEffect::Notify {
                 player_id: pid,
                 event: GameEvent::AskPlaced { player_id, ask_value },
@@ -342,17 +377,37 @@ impl GameState {
     }
 
     fn resolve_asks(&mut self) -> Vec<(PlayerId, i32)> {
-        self.open_asks
-            .extract_if(.., |&mut (_, v)| v <= self.current_price)
-            .map(|(player_id, ask_value)| {
-                // Ask is <= price, so sell at price
-                if let Some(pos) = self.share_transactions.iter().position(|(pid, _)| *pid == player_id) {
-                    self.share_transactions.remove(pos);
+        let current_price = self.current_price;
+        let mut resolved = Vec::new();
+
+        for (player_id, state) in &mut self.players {
+            let filled_indices: Vec<usize> = state
+                .pending_asks
+                .iter()
+                .enumerate()
+                .filter(|(_, ask)| **ask <= current_price)
+                .map(|(i, _)| i)
+                .collect();
+
+            for i in filled_indices.into_iter().rev() {
+                let ask_value = state.pending_asks.remove(i);
+                if !state.shares.is_empty() {
+                    state.shares.pop();
                 }
-                self.cash_transactions.push((player_id, self.current_price));
-                (player_id, ask_value)
-            })
-            .collect()
+                state.cash += current_price;
+                resolved.push((*player_id, ask_value));
+            }
+        }
+
+        resolved
+    }
+
+    #[cfg(test)]
+    fn get_player(
+        &self,
+        player_id: PlayerId,
+    ) -> Option<&PlayerState> {
+        self.players.get(&player_id)
     }
 }
 
@@ -388,7 +443,8 @@ mod tests {
         player_id: PlayerId,
         want_balance: i32,
     ) {
-        let got_balance = state.get_cash_balance(player_id);
+        let player = state.get_player(player_id).expect("player not found");
+        let got_balance = player.available_cash();
 
         assert_eq!(
             got_balance, want_balance,
@@ -403,19 +459,15 @@ mod tests {
         want_count: usize,
         want_total: i32,
     ) {
-        let got_balance = state
-            .share_transactions
-            .iter()
-            .filter(|(pid, _)| *pid == player_id)
-            .map(|(_, balance)| balance)
-            .sum::<i32>();
+        let player = state.get_player(player_id).expect("player not found");
+        let got_balance: i32 = player.shares.iter().sum();
         assert_eq!(
             got_balance, want_total,
             "Expected total share value for player {:?} to be {}, but got {}",
             player_id, want_total, got_balance
         );
 
-        let got_count = state.share_transactions.iter().filter(|(pid, _)| *pid == player_id).count();
+        let got_count = player.shares.len();
 
         assert_eq!(
             got_count, want_count,
@@ -430,14 +482,9 @@ mod tests {
         want_num_bids: usize,
         want_total_value: i32,
     ) {
-        let player_bids = state
-            .open_bids
-            .iter()
-            .filter(|(pid, _)| *pid == player_id)
-            .map(|(_, value)| *value);
-
-        let got_bid_count = player_bids.clone().count();
-        let got_total_value: i32 = player_bids.clone().sum();
+        let player = state.get_player(player_id).expect("player not found");
+        let got_bid_count = player.pending_bids.len();
+        let got_total_value: i32 = player.pending_bids.iter().sum();
 
         assert_eq!(
             want_num_bids, got_bid_count,
@@ -458,13 +505,9 @@ mod tests {
         want_num_asks: usize,
         want_total_value: i32,
     ) {
-        let player_asks = state
-            .open_asks
-            .iter()
-            .filter(|(pid, _)| *pid == player_id)
-            .map(|(_, value)| *value);
-        let got_ask_count = player_asks.clone().count();
-        let got_total_value: i32 = player_asks.clone().sum();
+        let player = state.get_player(player_id).expect("player not found");
+        let got_ask_count = player.pending_asks.len();
+        let got_total_value: i32 = player.pending_asks.iter().sum();
         assert_eq!(
             want_num_asks, got_ask_count,
             "Expected {} open asks for player {:?}, but got {}",

@@ -4,7 +4,7 @@ use crate::PlayerId;
 pub struct MatchmakingQueue(Vec<PlayerId>);
 
 impl MatchmakingQueue {
-    #[must_use] 
+    #[must_use]
     pub fn players(&self) -> &Vec<PlayerId> {
         &self.0
     }
@@ -26,12 +26,12 @@ pub enum MatchmakingOutcome {
 }
 
 impl MatchmakingQueue {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn execute(
+    pub fn handle_command(
         &mut self,
         command: MatchmakingCommand,
     ) -> MatchmakingOutcome {

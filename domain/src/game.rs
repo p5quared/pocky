@@ -89,7 +89,7 @@ pub struct GameState {
     players: HashMap<PlayerId, PlayerState>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum GameAction {
     Countdown(u32),
     Start,
@@ -99,7 +99,7 @@ pub enum GameAction {
     End,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub enum GameEvent {
     Countdown(u32),
     GameStarted { starting_price: i32 },
@@ -111,7 +111,7 @@ pub enum GameEvent {
     GameEnded,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum GameEffect {
     Notify { player_id: PlayerId, event: GameEvent },
     DelayedAction { delay_ms: u64, action: GameAction },
@@ -282,14 +282,15 @@ impl GameState {
 
     fn resolve_bids(&mut self) -> Vec<(PlayerId, i32)> {
         let current_price = self.current_price;
-        let mut resolved = Vec::new();
+        let can_fill_bid = |bid: i32| bid >= current_price;
 
+        let mut resolved = Vec::new();
         for (player_id, state) in &mut self.players {
             let filled_indices: Vec<usize> = state
                 .pending_bids
                 .iter()
                 .enumerate()
-                .filter(|(_, bid)| **bid >= current_price)
+                .filter(|(_, bid)| can_fill_bid(**bid))
                 .map(|(i, _)| i)
                 .collect();
 
@@ -378,6 +379,7 @@ impl GameState {
 
     fn resolve_asks(&mut self) -> Vec<(PlayerId, i32)> {
         let current_price = self.current_price;
+        let can_resolve_ask = |ask: i32| ask <= current_price;
         let mut resolved = Vec::new();
 
         for (player_id, state) in &mut self.players {
@@ -385,7 +387,7 @@ impl GameState {
                 .pending_asks
                 .iter()
                 .enumerate()
-                .filter(|(_, ask)| **ask <= current_price)
+                .filter(|(_, ask)| can_resolve_ask(**ask))
                 .map(|(i, _)| i)
                 .collect();
 
@@ -415,6 +417,320 @@ impl GameState {
 mod tests {
     use super::*;
 
+    #[derive(Default, Clone)]
+    struct ExpectedPlayer {
+        cash: Option<i32>,
+        shares: Option<usize>,
+        bids: Option<usize>,
+        asks: Option<usize>,
+    }
+
+    fn player() -> ExpectedPlayer {
+        ExpectedPlayer::default()
+    }
+
+    impl ExpectedPlayer {
+        fn cash(
+            mut self,
+            cash: i32,
+        ) -> Self {
+            self.cash = Some(cash);
+            self
+        }
+
+        fn shares(
+            mut self,
+            count: usize,
+        ) -> Self {
+            self.shares = Some(count);
+            self
+        }
+
+        fn bids(
+            mut self,
+            count: usize,
+        ) -> Self {
+            self.bids = Some(count);
+            self
+        }
+
+        fn asks(
+            mut self,
+            count: usize,
+        ) -> Self {
+            self.asks = Some(count);
+            self
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum ExpectedOutcome {
+        Ok,
+        InsufficientFunds { available: i32, required: i32 },
+        InsufficientShares { available: usize, required: usize },
+        InvalidPhase { action: &'static str },
+    }
+
+    struct TestHarness {
+        game: GameState,
+        players: Vec<PlayerId>,
+        last_result: Result<Vec<GameEffect>, GameError>,
+    }
+
+    impl TestHarness {
+        fn new(num_players: usize) -> Self {
+            let players: Vec<PlayerId> = (0..num_players).map(|_| PlayerId(uuid::Uuid::new_v4())).collect();
+            let game = GameState::new(players.clone(), test_config());
+            Self {
+                game,
+                players,
+                last_result: Ok(vec![]),
+            }
+        }
+
+        fn at_price(
+            mut self,
+            price: i32,
+        ) -> Self {
+            self.game.current_price = price;
+            self.game.phase = GamePhase::Running;
+            self
+        }
+
+        fn pending(self) -> Self {
+            self
+        }
+
+        fn bid(
+            &mut self,
+            player_idx: usize,
+            value: i32,
+        ) -> &mut Self {
+            let player_id = self.players[player_idx];
+            self.last_result = self.game.process_action(GameAction::Bid {
+                player_id,
+                bid_value: value,
+            });
+            self
+        }
+
+        fn ask(
+            &mut self,
+            player_idx: usize,
+            value: i32,
+        ) -> &mut Self {
+            let player_id = self.players[player_idx];
+            self.last_result = self.game.process_action(GameAction::Ask {
+                player_id,
+                ask_value: value,
+            });
+            self
+        }
+
+        fn start(&mut self) -> &mut Self {
+            self.last_result = self.game.process_action(GameAction::Start);
+            self
+        }
+
+        fn tick(&mut self) -> &mut Self {
+            self.last_result = self.game.process_action(GameAction::Tick);
+            self
+        }
+
+        fn end(&mut self) -> &mut Self {
+            self.last_result = self.game.process_action(GameAction::End);
+            self
+        }
+
+        fn set_price(
+            &mut self,
+            price: i32,
+        ) -> &mut Self {
+            self.game.current_price = price;
+            self
+        }
+
+        fn resolve_bids(&mut self) -> &mut Self {
+            self.game.resolve_bids();
+            self
+        }
+
+        fn resolve_asks(&mut self) -> &mut Self {
+            self.game.resolve_asks();
+            self
+        }
+
+        #[track_caller]
+        fn check(
+            &self,
+            player_idx: usize,
+            expected: ExpectedPlayer,
+        ) -> &Self {
+            let player_id = self.players[player_idx];
+            let state = self.game.get_player(player_id).expect("player not found");
+
+            if let Some(expected_cash) = expected.cash {
+                let actual = state.available_cash();
+                assert_eq!(
+                    actual, expected_cash,
+                    "Player {}: expected cash {}, got {}",
+                    player_idx, expected_cash, actual
+                );
+            }
+
+            if let Some(expected_shares) = expected.shares {
+                let actual = state.shares.len();
+                assert_eq!(
+                    actual, expected_shares,
+                    "Player {}: expected {} shares, got {}",
+                    player_idx, expected_shares, actual
+                );
+            }
+
+            if let Some(expected_bids) = expected.bids {
+                let actual = state.pending_bids.len();
+                assert_eq!(
+                    actual, expected_bids,
+                    "Player {}: expected {} pending bids, got {}",
+                    player_idx, expected_bids, actual
+                );
+            }
+
+            if let Some(expected_asks) = expected.asks {
+                let actual = state.pending_asks.len();
+                assert_eq!(
+                    actual, expected_asks,
+                    "Player {}: expected {} pending asks, got {}",
+                    player_idx, expected_asks, actual
+                );
+            }
+
+            self
+        }
+
+        #[track_caller]
+        fn check_outcome(
+            &self,
+            expected: ExpectedOutcome,
+        ) -> &Self {
+            match (&self.last_result, &expected) {
+                (Ok(_), ExpectedOutcome::Ok) => {}
+                (
+                    Err(GameError::InsufficientFunds { available, required }),
+                    ExpectedOutcome::InsufficientFunds {
+                        available: exp_avail,
+                        required: exp_req,
+                    },
+                ) => {
+                    assert_eq!(*available, *exp_avail, "InsufficientFunds: available mismatch");
+                    assert_eq!(*required, *exp_req, "InsufficientFunds: required mismatch");
+                }
+                (
+                    Err(GameError::InsufficientShares { available, required }),
+                    ExpectedOutcome::InsufficientShares {
+                        available: exp_avail,
+                        required: exp_req,
+                    },
+                ) => {
+                    assert_eq!(*available, *exp_avail, "InsufficientShares: available mismatch");
+                    assert_eq!(*required, *exp_req, "InsufficientShares: required mismatch");
+                }
+                (Err(GameError::InvalidPhase { action, .. }), ExpectedOutcome::InvalidPhase { action: exp_action }) => {
+                    assert_eq!(*action, *exp_action, "InvalidPhase: action mismatch");
+                }
+                _ => {
+                    panic!("Outcome mismatch: expected {:?}, got {:?}", expected, self.last_result);
+                }
+            }
+            self
+        }
+
+        #[track_caller]
+        fn check_ok(&self) -> &Self {
+            self.check_outcome(ExpectedOutcome::Ok)
+        }
+
+        #[track_caller]
+        fn check_phase(
+            &self,
+            expected: GamePhase,
+        ) -> &Self {
+            assert_eq!(
+                self.game.phase, expected,
+                "Expected phase {:?}, got {:?}",
+                expected, self.game.phase
+            );
+            self
+        }
+
+        #[track_caller]
+        fn check_price(
+            &self,
+            expected: i32,
+        ) -> &Self {
+            assert_eq!(
+                self.game.current_price, expected,
+                "Expected price {}, got {}",
+                expected, self.game.current_price
+            );
+            self
+        }
+
+        #[track_caller]
+        fn check_price_in_range(
+            &self,
+            base: i32,
+            max_delta: i32,
+        ) -> &Self {
+            let delta = (self.game.current_price - base).abs();
+            assert!(
+                delta <= max_delta,
+                "Price {} is outside range [{}, {}]",
+                self.game.current_price,
+                base - max_delta,
+                base + max_delta
+            );
+            self
+        }
+
+        #[track_caller]
+        fn check_all_notified<F>(
+            &self,
+            predicate: F,
+        ) -> &Self
+        where
+            F: Fn(&GameEvent) -> bool,
+        {
+            let effects = self.last_result.as_ref().expect("last action failed");
+            for player_id in &self.players {
+                let found = effects.iter().any(|e| match e {
+                    GameEffect::Notify { player_id: pid, event } if pid == player_id => predicate(event),
+                    _ => false,
+                });
+                assert!(found, "Player {:?} was not notified", player_id);
+            }
+            self
+        }
+
+        #[track_caller]
+        fn check_has_delayed_action(
+            &self,
+            delay_ms: u64,
+            action: GameAction,
+        ) -> &Self {
+            let effects = self.last_result.as_ref().expect("last action failed");
+            let found = effects.iter().any(|e| {
+                matches!(e, GameEffect::DelayedAction { delay_ms: d, action: a } if *d == delay_ms && matches!((a, &action), (GameAction::Tick, GameAction::Tick) | (GameAction::End, GameAction::End)))
+            });
+            assert!(
+                found,
+                "Expected DelayedAction {{ delay_ms: {}, action: {:?} }}",
+                delay_ms, action
+            );
+            self
+        }
+    }
+
     fn test_config() -> GameConfig {
         GameConfig {
             tick_interval_ms: 1000,
@@ -426,489 +742,172 @@ mod tests {
         }
     }
 
-    /// Create a game already in Running state at the given price
-    fn create_running_game(
-        players: Vec<PlayerId>,
-        price: i32,
-    ) -> GameState {
-        let mut config = test_config();
-        config.starting_price = price;
-        let mut game = GameState::new(players, config);
-        game.process_action(GameAction::Start).unwrap();
-        game
-    }
-
-    fn assert_cash(
-        state: &GameState,
-        player_id: PlayerId,
-        want_balance: i32,
-    ) {
-        let player = state.get_player(player_id).expect("player not found");
-        let got_balance = player.available_cash();
-
-        assert_eq!(
-            got_balance, want_balance,
-            "Expected cash balance for player {:?} to be {}, but got {}",
-            player_id, want_balance, got_balance
-        );
-    }
-
-    fn assert_shares(
-        state: &GameState,
-        player_id: PlayerId,
-        want_count: usize,
-        want_total: i32,
-    ) {
-        let player = state.get_player(player_id).expect("player not found");
-        let got_balance: i32 = player.shares.iter().sum();
-        assert_eq!(
-            got_balance, want_total,
-            "Expected total share value for player {:?} to be {}, but got {}",
-            player_id, want_total, got_balance
-        );
-
-        let got_count = player.shares.len();
-
-        assert_eq!(
-            got_count, want_count,
-            "Expected {} shares for player {:?}, but got {}",
-            want_count, player_id, got_count
-        );
-    }
-
-    fn assert_open_bids(
-        state: &GameState,
-        player_id: PlayerId,
-        want_num_bids: usize,
-        want_total_value: i32,
-    ) {
-        let player = state.get_player(player_id).expect("player not found");
-        let got_bid_count = player.pending_bids.len();
-        let got_total_value: i32 = player.pending_bids.iter().sum();
-
-        assert_eq!(
-            want_num_bids, got_bid_count,
-            "Expected {} open bids for player {:?}, but got {}",
-            want_num_bids, player_id, got_bid_count
-        );
-
-        assert_eq!(
-            want_total_value, got_total_value,
-            "Expected total bid value for player {:?} to be {}, but got {}",
-            player_id, want_total_value, got_total_value,
-        );
-    }
-
-    fn assert_open_asks(
-        state: &GameState,
-        player_id: PlayerId,
-        want_num_asks: usize,
-        want_total_value: i32,
-    ) {
-        let player = state.get_player(player_id).expect("player not found");
-        let got_ask_count = player.pending_asks.len();
-        let got_total_value: i32 = player.pending_asks.iter().sum();
-        assert_eq!(
-            want_num_asks, got_ask_count,
-            "Expected {} open asks for player {:?}, but got {}",
-            want_num_asks, player_id, got_ask_count
-        );
-        assert_eq!(
-            want_total_value, got_total_value,
-            "Expected total ask value for player {:?} to be {}, but got {}",
-            player_id, want_total_value, got_total_value,
-        );
-    }
-
     #[test]
     fn test_transactions() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 0 so bids don't immediately resolve
-        let mut engine = create_running_game(vec![p], 0);
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 20,
-            })
-            .unwrap();
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 40,
-            })
-            .unwrap();
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 40,
-            })
-            .unwrap();
+        let mut t = TestHarness::new(1).at_price(0);
 
-        assert_cash(&engine, p, 0);
-        assert_open_bids(&engine, p, 3, 100);
+        // Place 3 bids totaling 100 (all available cash)
+        t.bid(0, 20).bid(0, 40).bid(0, 40);
+        t.check(0, player().cash(0).bids(3));
 
-        // Set price directly and resolve (simulating what PriceTick does)
-        engine.current_price = 30;
-        engine.resolve_bids();
-        // 2 bids for 40 filled @30, refund 10 each
-        assert_cash(&engine, p, 20);
-        assert_shares(&engine, p, 2, 60);
-        assert_open_bids(&engine, p, 1, 20);
+        // Resolve at price 30: two 40-bids fill, one 20-bid stays pending
+        t.set_price(30).resolve_bids();
+        t.check(0, player().cash(20).shares(2).bids(1));
 
-        engine
-            .process_action(GameAction::Ask {
-                player_id: p,
-                ask_value: 75,
-            })
-            .unwrap();
-        assert_open_asks(&engine, p, 1, 75);
+        // Place an ask
+        t.ask(0, 75);
+        t.check(0, player().asks(1));
 
-        // Set price directly and resolve
-        engine.current_price = 100;
-        engine.resolve_asks();
-        // ask filled @100
-        assert_cash(&engine, p, 120);
-        assert_shares(&engine, p, 1, 30);
-        assert_open_asks(&engine, p, 0, 0);
+        // Resolve at price 100: ask fills, player gets 100 cash
+        t.set_price(100).resolve_asks();
+        t.check(0, player().cash(120).shares(1).asks(0));
     }
 
     #[test]
     fn test_bid_insufficient_funds() {
-        let valid_player = PlayerId(uuid::Uuid::new_v4());
-        let invalid_player = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![valid_player], 50);
+        let mut t = TestHarness::new(1).at_price(50);
 
-        // Player not in game has 0 balance
-        let result = engine.process_action(GameAction::Bid {
-            player_id: invalid_player,
-            bid_value: 50,
+        // Try to bid more than available (100 starting balance)
+        t.bid(0, 150);
+        t.check_outcome(ExpectedOutcome::InsufficientFunds {
+            available: 100,
+            required: 150,
         });
-
-        assert!(matches!(
-            result,
-            Err(GameError::InsufficientFunds {
-                available: 0,
-                required: 50
-            })
-        ));
     }
 
     #[test]
     fn test_ask_insufficient_shares() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p], 50);
+        let mut t = TestHarness::new(1).at_price(50);
 
-        // No shares owned, ask should return error
-        let result = engine.process_action(GameAction::Ask {
-            player_id: p,
-            ask_value: 50,
+        // Try to ask without owning any shares
+        t.ask(0, 50);
+        t.check_outcome(ExpectedOutcome::InsufficientShares {
+            available: 0,
+            required: 1,
         });
-
-        assert!(matches!(
-            result,
-            Err(GameError::InsufficientShares {
-                available: 0,
-                required: 1
-            })
-        ));
     }
 
     #[test]
     fn test_start_game() {
-        let p1 = PlayerId(uuid::Uuid::new_v4());
-        let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut config = test_config();
-        config.starting_price = 50;
-        let mut engine = GameState::new(vec![p1, p2], config);
+        let mut t = TestHarness::new(2).pending();
 
-        assert_eq!(engine.phase, GamePhase::Pending);
+        t.check_phase(GamePhase::Pending);
 
-        let effects = engine.process_action(GameAction::Start).unwrap();
-
-        assert_eq!(engine.phase, GamePhase::Running);
-        assert_eq!(engine.current_price, 50);
-
-        // Should have GameStarted notifications for both players + SchedulePriceTick
-        let started_notifications: Vec<_> = effects
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e,
-                    GameEffect::Notify {
-                        event: GameEvent::GameStarted { .. },
-                        ..
-                    }
-                )
-            })
-            .collect();
-        assert_eq!(started_notifications.len(), 2);
-
-        assert!(effects.iter().any(|e| matches!(
-            e,
-            GameEffect::DelayedAction {
-                delay_ms: 1000,
-                action: GameAction::Tick
-            }
-        )),);
+        t.start();
+        t.check_ok()
+            .check_phase(GamePhase::Running)
+            .check_price(50)
+            .check_all_notified(|e| matches!(e, GameEvent::GameStarted { .. }))
+            .check_has_delayed_action(1000, GameAction::Tick);
     }
 
     #[test]
     fn test_price_tick() {
-        let p1 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1], 50);
+        let mut t = TestHarness::new(1).at_price(50);
 
-        let effects = engine.process_action(GameAction::Tick).unwrap();
-
-        // Price should have changed (within delta range)
-        let price_delta = (engine.current_price - 50).abs();
-        assert!(price_delta <= 10, "Price delta {} exceeds max_delta 10", price_delta);
-
-        // Should have PriceChanged notification + SchedulePriceTick
-        assert!(effects.iter().any(|e| matches!(
-            e,
-            GameEffect::Notify {
-                event: GameEvent::PriceChanged(_),
-                ..
-            }
-        )));
+        t.tick();
+        t.check_ok()
+            .check_price_in_range(50, 10)
+            .check_all_notified(|e| matches!(e, GameEvent::PriceChanged(_)));
     }
 
     #[test]
     fn test_bid_resolved_notifications() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 0 so the bid doesn't immediately resolve
-        let mut engine = create_running_game(vec![p], 0);
+        let mut t = TestHarness::new(1).at_price(0);
 
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 40,
-            })
-            .unwrap();
+        t.bid(0, 40);
+        t.check(0, player().bids(1));
 
-        // Set price to 30 and process a tick to trigger resolution
-        engine.current_price = 30;
-        let resolved = engine.resolve_bids();
-
-        // Should have resolved the bid
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0], (p, 40));
+        // Resolve at price 30 (bid >= price)
+        t.set_price(30).resolve_bids();
+        t.check(0, player().shares(1).bids(0));
     }
 
     #[test]
     fn test_ask_resolved_notifications() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p], 50);
+        let mut t = TestHarness::new(1).at_price(50);
 
         // Buy a share first
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 50,
-            })
-            .unwrap();
-        // Resolve the bid at current price
-        engine.resolve_bids();
-        assert_shares(&engine, p, 1, 50);
+        t.bid(0, 50).resolve_bids();
+        t.check(0, player().shares(1));
 
         // Place an ask
-        engine
-            .process_action(GameAction::Ask {
-                player_id: p,
-                ask_value: 60,
-            })
-            .unwrap();
+        t.ask(0, 60);
+        t.check(0, player().asks(1));
 
-        // Price goes up, ask should be resolved
-        engine.current_price = 70;
-        let resolved = engine.resolve_asks();
-
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0], (p, 60));
-        assert_shares(&engine, p, 0, 0);
+        // Resolve at price 70 (ask <= price)
+        t.set_price(70).resolve_asks();
+        t.check(0, player().shares(0).asks(0));
     }
 
     #[test]
     fn test_bid_placed_notifications() {
-        let p1 = PlayerId(uuid::Uuid::new_v4());
-        let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1, p2], 50);
+        let mut t = TestHarness::new(2).at_price(50);
 
-        let effects = engine
-            .process_action(GameAction::Bid {
-                player_id: p1,
-                bid_value: 50,
-            })
-            .unwrap();
-
-        // Both players should be notified of the bid
-        assert_eq!(effects.len(), 2);
-        let notified_players: Vec<_> = effects
-            .iter()
-            .filter_map(|e| match e {
-                GameEffect::Notify {
-                    player_id,
-                    event:
-                        GameEvent::BidPlaced {
-                            player_id: bidder,
-                            bid_value: 50,
-                        },
-                } if *bidder == p1 => Some(*player_id),
-                _ => None,
-            })
-            .collect();
-        assert!(notified_players.contains(&p1));
-        assert!(notified_players.contains(&p2));
+        t.bid(0, 50);
+        t.check_ok().check_all_notified(|e| matches!(e, GameEvent::BidPlaced { .. }));
     }
 
     #[test]
     fn test_ask_placed_notifications() {
-        let p1 = PlayerId(uuid::Uuid::new_v4());
-        let p2 = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p1, p2], 50);
+        let mut t = TestHarness::new(2).at_price(50);
 
-        // p1 needs to own a share first
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p1,
-                bid_value: 50,
-            })
-            .unwrap();
-        engine.resolve_bids();
+        // Player 0 needs to own a share first
+        t.bid(0, 50).resolve_bids();
 
-        let effects = engine
-            .process_action(GameAction::Ask {
-                player_id: p1,
-                ask_value: 60,
-            })
-            .unwrap();
-
-        // Both players should be notified of the ask
-        assert_eq!(effects.len(), 2);
-        let notified_players: Vec<_> = effects
-            .iter()
-            .filter_map(|e| match e {
-                GameEffect::Notify {
-                    player_id,
-                    event:
-                        GameEvent::AskPlaced {
-                            player_id: asker,
-                            ask_value: 60,
-                        },
-                } if *asker == p1 => Some(*player_id),
-                _ => None,
-            })
-            .collect();
-        assert!(notified_players.contains(&p1));
-        assert!(notified_players.contains(&p2));
+        t.ask(0, 60);
+        t.check_ok().check_all_notified(|e| matches!(e, GameEvent::AskPlaced { .. }));
     }
 
     #[test]
     fn test_game_end_notifications() {
-        let p1 = PlayerId(uuid::Uuid::new_v4());
-        let p2 = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = create_running_game(vec![p1, p2], 50);
+        let mut t = TestHarness::new(2).at_price(50);
 
-        let effects = engine.process_action(GameAction::End).unwrap();
-
-        // Should notify both players of game end
-        assert_eq!(effects.len(), 2);
-        let notified_players: Vec<_> = effects
-            .iter()
-            .filter_map(|e| match e {
-                GameEffect::Notify {
-                    player_id,
-                    event: GameEvent::GameEnded,
-                } => Some(*player_id),
-                _ => None,
-            })
-            .collect();
-        assert!(notified_players.contains(&p1));
-        assert!(notified_players.contains(&p2));
+        t.end();
+        t.check_ok().check_all_notified(|e| matches!(e, GameEvent::GameEnded));
     }
 
     #[test]
     fn test_ask_error_when_insufficient_shares() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 50 so bid resolves immediately
-        let mut engine = create_running_game(vec![p], 50);
+        let mut t = TestHarness::new(1).at_price(50);
 
         // Buy one share
-        engine
-            .process_action(GameAction::Bid {
-                player_id: p,
-                bid_value: 50,
-            })
-            .unwrap();
-        engine.resolve_bids();
-        assert_shares(&engine, p, 1, 50);
+        t.bid(0, 50).resolve_bids();
+        t.check(0, player().shares(1));
 
         // First ask should succeed
-        let effects = engine
-            .process_action(GameAction::Ask {
-                player_id: p,
-                ask_value: 60,
-            })
-            .unwrap();
-        assert!(
-            effects.iter().any(|e| matches!(
-                e,
-                GameEffect::Notify {
-                    event: GameEvent::AskPlaced { .. },
-                    ..
-                }
-            )),
-            "First ask should be placed"
-        );
-        assert_open_asks(&engine, p, 1, 60);
+        t.ask(0, 60);
+        t.check_ok().check(0, player().asks(1));
 
-        // Second ask should return InsufficientShares error - only 1 share but already 1 open ask
-        let result = engine.process_action(GameAction::Ask {
-            player_id: p,
-            ask_value: 70,
+        // Second ask should fail - only 1 share but already 1 pending ask
+        t.ask(0, 70);
+        t.check_outcome(ExpectedOutcome::InsufficientShares {
+            available: 0,
+            required: 1,
         });
-        assert!(matches!(
-            result,
-            Err(GameError::InsufficientShares {
-                available: 0,
-                required: 1
-            })
-        ));
-        assert_open_asks(&engine, p, 1, 60);
+        t.check(0, player().asks(1)); // Still just 1 ask
     }
 
     #[test]
     fn test_bid_error_when_not_running() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        let mut engine = GameState::new(vec![p], test_config());
+        let mut t = TestHarness::new(1).pending();
 
-        // Game is in Pending state, bid should return InvalidPhase error
-        let result = engine.process_action(GameAction::Bid {
-            player_id: p,
-            bid_value: 50,
-        });
-
-        assert!(matches!(
-            result,
-            Err(GameError::InvalidPhase {
-                action: "Bid",
-                phase: GamePhase::Pending
-            })
-        ));
+        t.bid(0, 50);
+        t.check_outcome(ExpectedOutcome::InvalidPhase { action: "Bid" });
     }
 
     #[test]
     fn test_price_stays_non_negative() {
-        let p = PlayerId(uuid::Uuid::new_v4());
-        // Start at price 0
-        let mut engine = create_running_game(vec![p], 0);
+        let mut t = TestHarness::new(1).at_price(0);
 
         // Run many ticks to test that price never goes negative
         for _ in 0..100 {
-            engine.process_action(GameAction::Tick).unwrap();
-            assert!(engine.current_price >= 0, "Price should never be negative");
+            t.tick();
+            assert!(
+                t.game.current_price >= 0,
+                "Price should never be negative, got {}",
+                t.game.current_price
+            );
         }
     }
 }

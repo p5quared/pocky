@@ -26,7 +26,7 @@ pub enum IncomingMessage {
 }
 
 pub struct AppState {
-    pub adapter: Arc<WebSocketNotifier>,
+    pub ws_messenger: Arc<WebSocketNotifier>,
     pub game_service: Arc<TokioMutex<GameService>>,
     pub matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
 }
@@ -38,7 +38,7 @@ impl AppState {
         matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
     ) -> Self {
         Self {
-            adapter,
+            ws_messenger: adapter,
             game_service,
             matchamaking_service,
         }
@@ -50,7 +50,7 @@ pub struct WebSocketNotifier {
 }
 
 impl WebSocketNotifier {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             connections: RwLock::new(Vec::new()),
@@ -126,7 +126,7 @@ pub async fn handle_connection(
         info!(player_id = ?player_id, "Player connected");
 
         let (sender, receiver) = socket.split();
-        state.adapter.register_player(player_id, sender).await;
+        state.ws_messenger.register_player(player_id, sender).await;
 
         handle_messages(player_id, receiver, state).await;
     })
@@ -174,5 +174,5 @@ async fn handle_messages(
     }
 
     info!(player_id = ?player_id, "Player disconnected");
-    state.adapter.unregister_player(player_id).await;
+    state.ws_messenger.unregister_player(player_id).await;
 }

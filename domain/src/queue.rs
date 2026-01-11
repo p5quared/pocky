@@ -1,12 +1,36 @@
 use crate::PlayerId;
 
 #[derive(Default, Clone)]
-pub struct MatchmakingQueue(Vec<PlayerId>);
+pub struct MatchmakingQueue {
+    queue: Vec<PlayerId>,
+    config: MatchmakingConfig,
+}
+
+#[derive(Clone)]
+pub struct MatchmakingConfig {
+    players_to_start: usize,
+}
+
+impl Default for MatchmakingConfig {
+    fn default() -> Self {
+        Self { players_to_start: 2 }
+    }
+}
+
+impl MatchmakingConfig {
+    pub fn players_to_start(&self) -> usize {
+        self.players_to_start
+    }
+}
 
 impl MatchmakingQueue {
     #[must_use]
-    pub fn players(&self) -> &Vec<PlayerId> {
-        &self.0
+    pub fn queue(&self) -> &Vec<PlayerId> {
+        &self.queue
+    }
+
+    pub fn queue_mut(&mut self) -> &mut Vec<PlayerId> {
+        &mut self.queue
     }
 }
 
@@ -37,24 +61,24 @@ impl MatchmakingQueue {
     ) -> MatchmakingOutcome {
         match command {
             MatchmakingCommand::PlayerJoin(player_id) => {
-                if self.0.contains(&player_id) {
+                if self.queue().contains(&player_id) {
                     MatchmakingOutcome::AlreadyQueued
                 } else {
-                    self.0.push(player_id);
+                    self.queue_mut().push(player_id);
                     MatchmakingOutcome::Enqueued(player_id)
                 }
             }
             MatchmakingCommand::PlayerLeave(player_id) => {
-                if let Some(pos) = self.0.iter().position(|&pid| pid == player_id) {
-                    self.0.remove(pos);
+                if let Some(pos) = self.queue().iter().position(|&pid| pid == player_id) {
+                    self.queue_mut().remove(pos);
                     MatchmakingOutcome::Dequeued(player_id)
                 } else {
                     MatchmakingOutcome::PlayerNotFound
                 }
             }
             MatchmakingCommand::TryMatchmake => {
-                if self.0.len() >= 2 {
-                    let matched = vec![self.0.remove(0), self.0.remove(0)];
+                if self.queue().len() >= self.config.players_to_start() {
+                    let matched = vec![self.queue_mut().remove(0), self.queue_mut().remove(0)];
                     MatchmakingOutcome::Matched(matched)
                 } else {
                     MatchmakingOutcome::Matched(vec![])

@@ -22,7 +22,7 @@ impl MatchmakingService {
     ) -> MatchmakingOutcome {
         let mut q = self.repository.load().await;
         let event = q.handle_command(MatchmakingCommand::PlayerJoin(player_id));
-        let players_before_matchmaking = q.players().clone();
+        let players_before_matchmaking = q.queue().clone();
         self.notifier.broadcast(&players_before_matchmaking, &event).await;
         if let MatchmakingOutcome::Matched(players) = q.handle_command(MatchmakingCommand::TryMatchmake)
             && !players.is_empty()
@@ -42,7 +42,7 @@ impl MatchmakingService {
     ) -> MatchmakingOutcome {
         let mut q = self.repository.load().await;
         let event = q.handle_command(MatchmakingCommand::PlayerLeave(player_id));
-        self.notifier.broadcast(q.players(), &event).await;
+        self.notifier.broadcast(q.queue(), &event).await;
         event
     }
 }

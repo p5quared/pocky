@@ -150,7 +150,7 @@ async fn handle_messages(
                         let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
                     }
                     IncomingMessage::JoinQueue => {
-                        let matchmaking_s = state.matchamaking_service.lock().await;
+                        let mut matchmaking_s = state.matchamaking_service.lock().await;
                         let game_s = state.game_service.lock().await;
                         let outcome = matchmaking_s.join_queue(player_id).await;
                         match outcome {

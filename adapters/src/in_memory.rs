@@ -5,9 +5,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use application::ports::out_::{
-    AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, QueueRepository,
+    AsyncTimer, GameEventNotifier, GameEventScheduler, GameNotification, GameRepository,
 };
-use domain::{GameAction, GameId, GameState, MatchmakingQueue, PlayerId};
+use domain::{GameAction, GameId, GameState, PlayerId};
 
 pub struct InMemory {
     games: RwLock<HashMap<GameId, GameState>>,
@@ -91,35 +91,3 @@ impl GameEventScheduler for InMemory {
     }
 }
 
-pub struct InMemoryQueueRepository {
-    queue: RwLock<MatchmakingQueue>,
-}
-
-impl InMemoryQueueRepository {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            queue: RwLock::new(MatchmakingQueue::new()),
-        }
-    }
-}
-
-impl Default for InMemoryQueueRepository {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl QueueRepository for InMemoryQueueRepository {
-    async fn load(&self) -> MatchmakingQueue {
-        self.queue.read().unwrap().clone()
-    }
-
-    async fn save(
-        &self,
-        queue: MatchmakingQueue,
-    ) {
-        *self.queue.write().unwrap() = queue;
-    }
-}

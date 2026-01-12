@@ -4,9 +4,9 @@ use axum::{Router, routing::get};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 
-use adapters::{AppState, InMemory, InMemoryQueueRepository, TokioGameScheduler, WebSocketNotifier, handle_connection};
+use adapters::{AppState, InMemory, TokioGameScheduler, WebSocketNotifier, handle_connection};
 use application::ports::in_::{GameService, MatchmakingService};
-use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameRepository, QueueNotifier, QueueRepository};
+use application::ports::out_::{GameEventNotifier, GameEventScheduler, GameRepository, QueueNotifier};
 
 #[tokio::main]
 async fn main() {
@@ -25,10 +25,9 @@ async fn main() {
     let game_service = GameService::new(notifier, repo, scheduler);
 
     // Matchmaking service dependencies
-    let queue_repo: Arc<dyn QueueRepository> = Arc::new(InMemoryQueueRepository::new());
     let queue_notifier: Arc<dyn QueueNotifier> = ws_adapter.clone();
 
-    let matchmaking_service = MatchmakingService::new(queue_repo, queue_notifier);
+    let matchmaking_service = MatchmakingService::new(queue_notifier);
 
     let app_state = Arc::new(AppState::new(
         ws_adapter,

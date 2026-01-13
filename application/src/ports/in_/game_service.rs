@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::RwLock;
 
@@ -107,11 +106,11 @@ fn process_effects<N: GameEventNotifier + 'static>(
                     notifier.notify_player(player_id, GameNotification::GameEvent(event)).await;
                 });
             }
-            GameEffect::DelayedAction { delay_ms, action } => {
+            GameEffect::DelayedAction { delay, action } => {
                 let notifier = Arc::clone(&notifier);
                 let game_store = Arc::clone(&game_store);
                 tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    tokio::time::sleep(delay).await;
                     let _ = process_action(notifier, game_store, game_id, action).await;
                 });
             }

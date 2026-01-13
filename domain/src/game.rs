@@ -1,8 +1,11 @@
-use crate::PlayerId;
+use std::collections::HashMap;
+use std::time::Duration;
+
 use rand::Rng;
 use serde::Serialize;
-use std::collections::HashMap;
 use thiserror::Error;
+
+use crate::PlayerId;
 
 #[derive(Debug, Clone, Error)]
 pub enum GameError {
@@ -25,22 +28,22 @@ pub enum GamePhase {
 
 #[derive(Clone)]
 pub struct GameConfig {
-    pub tick_interval_ms: u64,
-    pub game_duration: u64,
+    pub tick_interval: Duration,
+    pub game_duration: Duration,
     pub max_price_delta: i32,
     pub starting_price: i32,
-    pub countdown_duration_ms: u64,
+    pub countdown_duration: Duration,
     pub starting_balance: i32,
 }
 
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
-            tick_interval_ms: 500,
-            game_duration: 360, // 360 ticks = 3 minutes
+            tick_interval: Duration::from_millis(500),
+            game_duration: Duration::from_secs(180),
             max_price_delta: 25,
             starting_price: 100,
-            countdown_duration_ms: 3000,
+            countdown_duration: Duration::from_secs(3),
             starting_balance: 1000,
         }
     }
@@ -111,10 +114,10 @@ pub enum GameEvent {
     GameEnded,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum GameEffect {
     Notify { player_id: PlayerId, event: GameEvent },
-    DelayedAction { delay_ms: u64, action: GameAction },
+    DelayedAction { delay: Duration, action: GameAction },
 }
 
 impl GameState {
@@ -159,18 +162,18 @@ impl GameState {
     ) -> (Self, Vec<GameEffect>) {
         let state = Self::new(players.clone(), config.clone());
 
-        let countdown_seconds = (config.countdown_duration_ms / 1000) as u32;
+        let countdown_seconds = config.countdown_duration.as_secs() as u32;
 
-        let countdown_effects = (1..=countdown_seconds).rev().map(|remaining| {
-            let delay_ms = u64::from(countdown_seconds - remaining) * 1000;
+        let countdown_effects = (1..=countdown_seconds).rev().map(move |remaining| {
+            let delay = Duration::from_secs(u64::from(countdown_seconds - remaining));
             GameEffect::DelayedAction {
-                delay_ms,
+                delay,
                 action: GameAction::Countdown(remaining),
             }
         });
 
         let start_effect = GameEffect::DelayedAction {
-            delay_ms: config.countdown_duration_ms,
+            delay: config.countdown_duration,
             action: GameAction::Start,
         };
 
@@ -211,9 +214,12 @@ impl GameState {
             },
         });
 
-        let timed_effects = (1..self.config.game_duration).map(|tick| GameEffect::DelayedAction {
-            delay_ms: tick * self.config.tick_interval_ms,
-            action: if tick == self.config.game_duration - 1 {
+        let tick_count = (self.config.game_duration.as_millis() / self.config.tick_interval.as_millis()) as u32;
+        let tick_interval = self.config.tick_interval;
+
+        let timed_effects = (1..tick_count).map(move |tick| GameEffect::DelayedAction {
+            delay: tick_interval * tick,
+            action: if tick == tick_count - 1 {
                 GameAction::End
             } else {
                 GameAction::Tick
@@ -715,29 +721,25 @@ mod tests {
         #[track_caller]
         fn check_has_delayed_action(
             &self,
-            delay_ms: u64,
+            delay: Duration,
             action: GameAction,
         ) -> &Self {
             let effects = self.last_result.as_ref().expect("last action failed");
             let found = effects.iter().any(|e| {
-                matches!(e, GameEffect::DelayedAction { delay_ms: d, action: a } if *d == delay_ms && matches!((a, &action), (GameAction::Tick, GameAction::Tick) | (GameAction::End, GameAction::End)))
+                matches!(e, GameEffect::DelayedAction { delay: d, action: a } if *d == delay && matches!((a, &action), (GameAction::Tick, GameAction::Tick) | (GameAction::End, GameAction::End)))
             });
-            assert!(
-                found,
-                "Expected DelayedAction {{ delay_ms: {}, action: {:?} }}",
-                delay_ms, action
-            );
+            assert!(found, "Expected DelayedAction {{ delay: {:?}, action: {:?} }}", delay, action);
             self
         }
     }
 
     fn test_config() -> GameConfig {
         GameConfig {
-            tick_interval_ms: 1000,
-            game_duration: 10,
+            tick_interval: Duration::from_secs(1),
+            game_duration: Duration::from_secs(10),
             max_price_delta: 10,
             starting_price: 50,
-            countdown_duration_ms: 3000,
+            countdown_duration: Duration::from_secs(3),
             starting_balance: 100,
         }
     }
@@ -798,7 +800,7 @@ mod tests {
             .check_phase(GamePhase::Running)
             .check_price(50)
             .check_all_notified(|e| matches!(e, GameEvent::GameStarted { .. }))
-            .check_has_delayed_action(1000, GameAction::Tick);
+            .check_has_delayed_action(Duration::from_secs(1), GameAction::Tick);
     }
 
     #[test]

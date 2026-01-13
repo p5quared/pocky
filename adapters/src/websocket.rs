@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
-use application::ports::in_::game_service::GameStore;
+use application::ports::in_::game_service::{GameStore, GameUseCase};
 use application::ports::in_::{MatchmakingService, game_service};
 use application::ports::out_::{GameEventNotifier, GameNotification, QueueNotifier};
 use domain::{GameId, MatchmakingOutcome, PlayerId};
@@ -145,41 +145,44 @@ async fn handle_messages(
             match serde_json::from_str::<IncomingMessage>(&text) {
                 Ok(incoming) => match incoming {
                     IncomingMessage::PlaceBid { game_id, value } => {
-                        let _ = game_service::place_bid(
+                        let _ = game_service::execute(
                             Arc::clone(&state.notifier),
                             Arc::clone(&state.game_store),
-                            game_id,
-                            player_id,
-                            value,
+                            GameUseCase::PlaceBid {
+                                game_id,
+                                player_id,
+                                value,
+                            },
                         )
                         .await;
                     }
                     IncomingMessage::PlaceAsk { game_id, value } => {
-                        let _ = game_service::place_ask(
+                        let _ = game_service::execute(
                             Arc::clone(&state.notifier),
                             Arc::clone(&state.game_store),
-                            game_id,
-                            player_id,
-                            value,
+                            GameUseCase::PlaceAsk {
+                                game_id,
+                                player_id,
+                                value,
+                            },
                         )
                         .await;
                     }
                     IncomingMessage::JoinQueue => {
                         let mut matchmaking_s = state.matchmaking_service.lock().await;
                         let outcome = matchmaking_s.join_queue(player_id).await;
-                        match outcome {
-                            MatchmakingOutcome::Matched(players) => {
-                                let _ = game_service::launch_game(
-                                    Arc::clone(&state.notifier),
-                                    Arc::clone(&state.game_store),
+                        if let MatchmakingOutcome::Matched(players) = outcome {
+                            let _ = game_service::execute(
+                                Arc::clone(&state.notifier),
+                                Arc::clone(&state.game_store),
+                                GameUseCase::LaunchGame {
                                     players,
-                                    domain::GameConfig::default(),
-                                )
-                                .await;
-                            }
-                            e => {
-                                debug!(player_id = ?player_id, event = ?e, "Player joined queue");
-                            }
+                                    config: domain::GameConfig::default(),
+                                },
+                            )
+                            .await;
+                        } else {
+                            debug!(player_id = ?player_id, event = ?outcome, "Player joined queue");
                         }
                     }
                     IncomingMessage::LeaveQueue => {

@@ -3,6 +3,11 @@ use std::sync::Arc;
 use crate::ports::out_::QueueNotifier;
 use domain::{MatchmakingCommand, MatchmakingOutcome, MatchmakingQueue, PlayerId};
 
+pub enum MatchmakingUseCase {
+    JoinQueue { player_id: PlayerId },
+    LeaveQueue { player_id: PlayerId },
+}
+
 pub struct MatchmakingService {
     queue: MatchmakingQueue,
     notifier: Arc<dyn QueueNotifier>,

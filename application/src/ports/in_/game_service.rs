@@ -9,39 +9,70 @@ use domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
 
 pub type GameStore = Arc<RwLock<HashMap<GameId, GameState>>>;
 
-pub async fn place_bid<N: GameEventNotifier + 'static>(
-    notifier: Arc<N>,
-    game_store: GameStore,
-    game_id: GameId,
-    player_id: PlayerId,
-    bid_value: i32,
-) -> Result<(), GameServiceError> {
-    process_action(notifier, game_store, game_id, GameAction::Bid { player_id, bid_value }).await
+pub enum GameUseCase {
+    PlaceBid {
+        game_id: GameId,
+        player_id: PlayerId,
+        value: i32,
+    },
+    PlaceAsk {
+        game_id: GameId,
+        player_id: PlayerId,
+        value: i32,
+    },
+    LaunchGame {
+        players: Vec<PlayerId>,
+        config: GameConfig,
+    },
 }
 
-pub async fn place_ask<N: GameEventNotifier + 'static>(
+pub async fn execute<N: GameEventNotifier + 'static>(
     notifier: Arc<N>,
     game_store: GameStore,
-    game_id: GameId,
-    player_id: PlayerId,
-    ask_value: i32,
+    use_case: GameUseCase,
 ) -> Result<(), GameServiceError> {
-    process_action(notifier, game_store, game_id, GameAction::Ask { player_id, ask_value }).await
-}
+    match use_case {
+        GameUseCase::PlaceBid {
+            game_id,
+            player_id,
+            value,
+        } => {
+            process_action(
+                notifier,
+                game_store,
+                game_id,
+                GameAction::Bid {
+                    player_id,
+                    bid_value: value,
+                },
+            )
+            .await
+        }
+        GameUseCase::PlaceAsk {
+            game_id,
+            player_id,
+            value,
+        } => {
+            process_action(
+                notifier,
+                game_store,
+                game_id,
+                GameAction::Ask {
+                    player_id,
+                    ask_value: value,
+                },
+            )
+            .await
+        }
+        GameUseCase::LaunchGame { players, config } => {
+            let game_id = GameId::new();
+            let (game_state, effects) = GameState::launch(players, config);
 
-pub async fn launch_game<N: GameEventNotifier + 'static>(
-    notifier: Arc<N>,
-    game_store: GameStore,
-    players: Vec<PlayerId>,
-    config: GameConfig,
-) -> Result<GameId, GameServiceError> {
-    let game_id = GameId::new();
-    let (game_state, effects) = GameState::launch(players, config);
-
-    game_store.write().await.insert(game_id, game_state);
-    process_effects(notifier, game_store, game_id, effects);
-
-    Ok(game_id)
+            game_store.write().await.insert(game_id, game_state);
+            process_effects(notifier, game_store, game_id, effects);
+            Ok(())
+        }
+    }
 }
 
 async fn process_action<N: GameEventNotifier + 'static>(

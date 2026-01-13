@@ -33,6 +33,7 @@ dependencies = [
  "async-trait",
  "domain",
  "serde",
+ "tokio",
 ]
 
 [[package]]

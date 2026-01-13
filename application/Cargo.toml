@@ -7,3 +7,4 @@ edition = "2024"
 async-trait.workspace = true
 domain.workspace = true
 serde.workspace = true
+tokio.workspace = true

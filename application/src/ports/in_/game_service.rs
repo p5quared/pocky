@@ -1,113 +1,88 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ports::out_::{GameEventNotifier, GameEventScheduler, GameNotification, GameRepository, GameServiceError};
+use tokio::sync::RwLock;
+
+use crate::ports::out_::{GameEventNotifier, GameNotification, GameServiceError};
 use domain::{GameAction, GameConfig, GameEffect, GameId, GameState, PlayerId};
 
-pub type DynNotifier = Arc<dyn GameEventNotifier>;
-pub type DynRepository = Arc<dyn GameRepository>;
-pub type DynScheduler = Arc<dyn GameEventScheduler>;
+pub type GameStore = Arc<RwLock<HashMap<GameId, GameState>>>;
 
-pub struct GameService {
-    notifier: DynNotifier,
-    repository: DynRepository,
-    scheduler: DynScheduler,
+pub async fn place_bid<N: GameEventNotifier + 'static>(
+    notifier: Arc<N>,
+    game_store: GameStore,
+    game_id: GameId,
+    player_id: PlayerId,
+    bid_value: i32,
+) -> Result<(), GameServiceError> {
+    process_action(notifier, game_store, game_id, GameAction::Bid { player_id, bid_value }).await
 }
 
-impl GameService {
-    pub fn new(
-        notifier: DynNotifier,
-        repository: DynRepository,
-        scheduler: DynScheduler,
-    ) -> Self {
-        Self {
-            notifier,
-            repository,
-            scheduler,
-        }
-    }
+pub async fn place_ask<N: GameEventNotifier + 'static>(
+    notifier: Arc<N>,
+    game_store: GameStore,
+    game_id: GameId,
+    player_id: PlayerId,
+    ask_value: i32,
+) -> Result<(), GameServiceError> {
+    process_action(notifier, game_store, game_id, GameAction::Ask { player_id, ask_value }).await
+}
 
-    pub async fn place_bid(
-        &self,
-        game_id: GameId,
-        player_id: PlayerId,
-        bid_value: i32,
-    ) -> Result<(), GameServiceError> {
-        let Some(mut game_state) = self.repository.load_game(game_id).await else {
+pub async fn launch_game<N: GameEventNotifier + 'static>(
+    notifier: Arc<N>,
+    game_store: GameStore,
+    players: Vec<PlayerId>,
+    config: GameConfig,
+) -> Result<GameId, GameServiceError> {
+    let game_id = GameId::new();
+    let (game_state, effects) = GameState::launch(players, config);
+
+    game_store.write().await.insert(game_id, game_state);
+    process_effects(notifier, game_store, game_id, effects);
+
+    Ok(game_id)
+}
+
+async fn process_action<N: GameEventNotifier + 'static>(
+    notifier: Arc<N>,
+    game_store: GameStore,
+    game_id: GameId,
+    action: GameAction,
+) -> Result<(), GameServiceError> {
+    let effects = {
+        let mut store = game_store.write().await;
+        let Some(game_state) = store.get_mut(&game_id) else {
             return Err(GameServiceError::GameNotFound(game_id));
         };
+        game_state.process_action(action)?
+    };
 
-        let effects = game_state.process_action(GameAction::Bid { player_id, bid_value })?;
-        self.process_effects(game_id, effects).await;
+    process_effects(notifier, game_store, game_id, effects);
+    Ok(())
+}
 
-        self.repository.save_game(game_id, &game_state).await;
-        Ok(())
-    }
-
-    pub async fn place_ask(
-        &self,
-        game_id: GameId,
-        player_id: PlayerId,
-        ask_value: i32,
-    ) -> Result<(), GameServiceError> {
-        let Some(mut game_state) = self.repository.load_game(game_id).await else {
-            return Err(GameServiceError::GameNotFound(game_id));
-        };
-
-        let effects = game_state.process_action(GameAction::Ask { player_id, ask_value })?;
-        self.process_effects(game_id, effects).await;
-
-        self.repository.save_game(game_id, &game_state).await;
-        Ok(())
-    }
-
-    pub async fn launch_game(
-        &self,
-        players: Vec<PlayerId>,
-        config: GameConfig,
-    ) -> Result<GameId, GameServiceError> {
-        let game_id = GameId::new();
-        let (game_state, effects) = GameState::launch(players, config);
-
-        self.repository.save_game(game_id, &game_state).await;
-        self.process_effects(game_id, effects).await;
-
-        Ok(game_id)
-    }
-
-    pub async fn process_price_tick(
-        &self,
-        game_id: GameId,
-    ) -> Result<(), GameServiceError> {
-        let Some(mut game_state) = self.repository.load_game(game_id).await else {
-            return Err(GameServiceError::GameNotFound(game_id));
-        };
-
-        let effects = game_state.process_action(GameAction::Tick)?;
-        self.repository.save_game(game_id, &game_state).await;
-
-        self.process_effects(game_id, effects).await;
-
-        Ok(())
-    }
-
-    async fn process_effects(
-        &self,
-        game_id: GameId,
-        effects: Vec<GameEffect>,
-    ) {
-        for effect in effects {
-            match effect {
-                GameEffect::Notify { player_id, event } => {
-                    self.notifier
-                        .notify_player(player_id, GameNotification::GameEvent(event))
-                        .await;
-                }
-                GameEffect::DelayedAction { delay_ms, action } => {
-                    self.scheduler
-                        .schedule_action(game_id, Duration::from_millis(delay_ms), action)
-                        .await;
-                }
+fn process_effects<N: GameEventNotifier + 'static>(
+    notifier: Arc<N>,
+    game_store: GameStore,
+    game_id: GameId,
+    effects: Vec<GameEffect>,
+) {
+    for effect in effects {
+        match effect {
+            GameEffect::Notify { player_id, event } => {
+                let notifier = Arc::clone(&notifier);
+                tokio::spawn(async move {
+                    notifier.notify_player(player_id, GameNotification::GameEvent(event)).await;
+                });
+            }
+            GameEffect::DelayedAction { delay_ms, action } => {
+                let notifier = Arc::clone(&notifier);
+                let game_store = Arc::clone(&game_store);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    let _ = process_action(notifier, game_store, game_id, action).await;
+                });
             }
         }
     }

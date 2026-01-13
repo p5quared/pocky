@@ -10,7 +10,8 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
-use application::ports::in_::{GameService, MatchmakingService};
+use application::ports::in_::game_service::GameStore;
+use application::ports::in_::{MatchmakingService, game_service};
 use application::ports::out_::{GameEventNotifier, GameNotification, QueueNotifier};
 use domain::{GameId, MatchmakingOutcome, PlayerId};
 
@@ -26,21 +27,21 @@ pub enum IncomingMessage {
 }
 
 pub struct AppState {
-    pub ws_messenger: Arc<WebSocketNotifier>,
-    pub game_service: Arc<TokioMutex<GameService>>,
-    pub matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
+    pub notifier: Arc<WebSocketNotifier>,
+    pub game_store: GameStore,
+    pub matchmaking_service: Arc<TokioMutex<MatchmakingService>>,
 }
 
 impl AppState {
     pub fn new(
-        adapter: Arc<WebSocketNotifier>,
-        game_service: Arc<TokioMutex<GameService>>,
-        matchamaking_service: Arc<TokioMutex<MatchmakingService>>,
+        notifier: Arc<WebSocketNotifier>,
+        game_store: GameStore,
+        matchmaking_service: Arc<TokioMutex<MatchmakingService>>,
     ) -> Self {
         Self {
-            ws_messenger: adapter,
-            game_service,
-            matchamaking_service,
+            notifier,
+            game_store,
+            matchmaking_service,
         }
     }
 }
@@ -126,7 +127,7 @@ pub async fn handle_connection(
         info!(player_id = ?player_id, "Player connected");
 
         let (sender, receiver) = socket.split();
-        state.ws_messenger.register_player(player_id, sender).await;
+        state.notifier.register_player(player_id, sender).await;
 
         handle_messages(player_id, receiver, state).await;
     })
@@ -144,18 +145,37 @@ async fn handle_messages(
             match serde_json::from_str::<IncomingMessage>(&text) {
                 Ok(incoming) => match incoming {
                     IncomingMessage::PlaceBid { game_id, value } => {
-                        let _ = state.game_service.lock().await.place_bid(game_id, player_id, value).await;
+                        let _ = game_service::place_bid(
+                            Arc::clone(&state.notifier),
+                            Arc::clone(&state.game_store),
+                            game_id,
+                            player_id,
+                            value,
+                        )
+                        .await;
                     }
                     IncomingMessage::PlaceAsk { game_id, value } => {
-                        let _ = state.game_service.lock().await.place_ask(game_id, player_id, value).await;
+                        let _ = game_service::place_ask(
+                            Arc::clone(&state.notifier),
+                            Arc::clone(&state.game_store),
+                            game_id,
+                            player_id,
+                            value,
+                        )
+                        .await;
                     }
                     IncomingMessage::JoinQueue => {
-                        let mut matchmaking_s = state.matchamaking_service.lock().await;
-                        let game_s = state.game_service.lock().await;
+                        let mut matchmaking_s = state.matchmaking_service.lock().await;
                         let outcome = matchmaking_s.join_queue(player_id).await;
                         match outcome {
                             MatchmakingOutcome::Matched(players) => {
-                                let _ = game_s.launch_game(players, domain::GameConfig::default()).await;
+                                let _ = game_service::launch_game(
+                                    Arc::clone(&state.notifier),
+                                    Arc::clone(&state.game_store),
+                                    players,
+                                    domain::GameConfig::default(),
+                                )
+                                .await;
                             }
                             e => {
                                 debug!(player_id = ?player_id, event = ?e, "Player joined queue");
@@ -163,7 +183,7 @@ async fn handle_messages(
                         }
                     }
                     IncomingMessage::LeaveQueue => {
-                        state.matchamaking_service.lock().await.remove_player(player_id).await;
+                        state.matchmaking_service.lock().await.remove_player(player_id).await;
                     }
                 },
                 Err(e) => {
@@ -174,5 +194,5 @@ async fn handle_messages(
     }
 
     info!(player_id = ?player_id, "Player disconnected");
-    state.ws_messenger.unregister_player(player_id).await;
+    state.notifier.unregister_player(player_id).await;
 }

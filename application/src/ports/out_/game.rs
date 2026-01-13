@@ -1,9 +1,7 @@
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde::Serialize;
 
-use domain::{GameAction, GameError, GameEvent, GameId, GameState, PlayerId};
+use domain::{GameError, GameEvent, GameId, PlayerId};
 
 #[derive(Debug)]
 pub enum GameServiceError {
@@ -28,29 +26,5 @@ pub trait GameEventNotifier: Send + Sync {
         &self,
         player_id: PlayerId,
         notification: GameNotification,
-    );
-}
-
-#[async_trait]
-pub trait GameRepository: Send + Sync {
-    async fn load_game(
-        &self,
-        game_id: GameId,
-    ) -> Option<GameState>;
-
-    async fn save_game(
-        &self,
-        game_id: GameId,
-        game_state: &GameState,
-    );
-}
-
-#[async_trait]
-pub trait GameEventScheduler: Send + Sync {
-    async fn schedule_action(
-        &self,
-        game_id: GameId,
-        delay: Duration,
-        action: GameAction,
     );
 }

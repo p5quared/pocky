@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -44,6 +45,19 @@ impl AppState {
             matchmaking_service,
         }
     }
+}
+
+pub fn create_app_state() -> Arc<AppState> {
+    let notifier = Arc::new(WebSocketNotifier::new());
+    let game_store = Arc::new(RwLock::new(HashMap::new()));
+    let queue_notifier: Arc<dyn QueueNotifier> = notifier.clone();
+    let matchmaking_service = MatchmakingService::new(queue_notifier);
+
+    Arc::new(AppState::new(
+        notifier,
+        game_store,
+        Arc::new(TokioMutex::new(matchmaking_service)),
+    ))
 }
 
 pub struct WebSocketNotifier {

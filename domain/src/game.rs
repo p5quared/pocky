@@ -102,10 +102,14 @@ pub enum GameAction {
     End,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub enum GameEvent {
     Countdown(u32),
-    GameStarted { starting_price: i32 },
+    GameStarted {
+        starting_price: i32,
+        starting_balance: i32,
+        players: Vec<PlayerId>,
+    },
     PriceChanged(i32),
     BidPlaced { player_id: PlayerId, bid_value: i32 },
     AskPlaced { player_id: PlayerId, ask_value: i32 },
@@ -207,10 +211,14 @@ impl GameState {
         self.phase = GamePhase::Running;
         self.current_price = self.config.starting_price;
 
-        let started_notifications = self.players.keys().map(|&player_id| GameEffect::Notify {
+        let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
+
+        let started_notifications = player_ids.iter().map(|&player_id| GameEffect::Notify {
             player_id,
             event: GameEvent::GameStarted {
                 starting_price: self.current_price,
+                starting_balance: self.config.starting_balance,
+                players: player_ids.clone(),
             },
         });
 

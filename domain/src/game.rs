@@ -137,6 +137,16 @@ impl GameState {
             GameAction::End => self.handle_game_end(),
         }
     }
+
+    fn require_phase(&self, required: GamePhase, action: &'static str) -> Result<(), GameError> {
+        if self.phase != required {
+            return Err(GameError::InvalidPhase {
+                action,
+                phase: self.phase.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 impl GameState {
@@ -200,12 +210,7 @@ impl GameState {
     }
 
     fn handle_start(&mut self) -> Result<Vec<GameEffect>, GameError> {
-        if self.phase != GamePhase::Pending {
-            return Err(GameError::InvalidPhase {
-                action: "Start",
-                phase: self.phase.clone(),
-            });
-        }
+        self.require_phase(GamePhase::Pending, "Start")?;
 
         self.phase = GamePhase::Running;
         self.current_price = self.config.starting_price;
@@ -237,12 +242,7 @@ impl GameState {
     }
 
     fn handle_price_tick(&mut self) -> Result<Vec<GameEffect>, GameError> {
-        if self.phase != GamePhase::Running {
-            return Err(GameError::InvalidPhase {
-                action: "PriceTick",
-                phase: self.phase.clone(),
-            });
-        }
+        self.require_phase(GamePhase::Running, "PriceTick")?;
 
         let mut rng = rand::thread_rng();
         let delta = rng.gen_range(-self.config.max_price_delta..=self.config.max_price_delta);
@@ -275,12 +275,7 @@ impl GameState {
     }
 
     fn handle_game_end(&mut self) -> Result<Vec<GameEffect>, GameError> {
-        if self.phase != GamePhase::Running {
-            return Err(GameError::InvalidPhase {
-                action: "End",
-                phase: self.phase.clone(),
-            });
-        }
+        self.require_phase(GamePhase::Running, "End")?;
         self.phase = GamePhase::Ended;
 
         Ok(self
@@ -323,12 +318,7 @@ impl GameState {
         player_id: PlayerId,
         bid_value: i32,
     ) -> Result<Vec<GameEffect>, GameError> {
-        if self.phase != GamePhase::Running {
-            return Err(GameError::InvalidPhase {
-                action: "Bid",
-                phase: self.phase.clone(),
-            });
-        }
+        self.require_phase(GamePhase::Running, "Bid")?;
 
         let state = self.players.get(&player_id);
         let available_player_balance = state.map(|s| s.available_cash()).unwrap_or(0);
@@ -359,12 +349,7 @@ impl GameState {
         player_id: PlayerId,
         ask_value: i32,
     ) -> Result<Vec<GameEffect>, GameError> {
-        if self.phase != GamePhase::Running {
-            return Err(GameError::InvalidPhase {
-                action: "Ask",
-                phase: self.phase.clone(),
-            });
-        }
+        self.require_phase(GamePhase::Running, "Ask")?;
 
         let state = self.players.get(&player_id);
         let player_shares_available = state.map(|s| s.available_shares()).unwrap_or(0);

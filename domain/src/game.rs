@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use rand::Rng;
-use serde::Serialize;
 use thiserror::Error;
 
 use crate::PlayerId;
@@ -102,7 +101,7 @@ pub enum GameAction {
     End,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub enum GameEvent {
     Countdown(u32),
     GameStarted {

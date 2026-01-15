@@ -89,6 +89,7 @@ pub struct GameState {
     config: GameConfig,
     current_price: i32,
     players: HashMap<PlayerId, PlayerState>,
+    ticks_remaining: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,10 +111,22 @@ pub enum GameEvent {
         players: Vec<PlayerId>,
     },
     PriceChanged(i32),
-    BidPlaced { player_id: PlayerId, bid_value: i32 },
-    AskPlaced { player_id: PlayerId, ask_value: i32 },
-    BidFilled { player_id: PlayerId, bid_value: i32 },
-    AskFilled { player_id: PlayerId, ask_value: i32 },
+    BidPlaced {
+        player_id: PlayerId,
+        bid_value: i32,
+    },
+    AskPlaced {
+        player_id: PlayerId,
+        ask_value: i32,
+    },
+    BidFilled {
+        player_id: PlayerId,
+        bid_value: i32,
+    },
+    AskFilled {
+        player_id: PlayerId,
+        ask_value: i32,
+    },
     GameEnded,
 }
 
@@ -138,7 +151,11 @@ impl GameState {
         }
     }
 
-    fn require_phase(&self, required: GamePhase, action: &'static str) -> Result<(), GameError> {
+    fn require_phase(
+        &self,
+        required: GamePhase,
+        action: &'static str,
+    ) -> Result<(), GameError> {
         if self.phase != required {
             return Err(GameError::InvalidPhase {
                 action,
@@ -156,6 +173,7 @@ impl GameState {
         config: GameConfig,
     ) -> Self {
         let starting_balance = config.starting_balance;
+        let tick_count = (config.game_duration.as_millis() / config.tick_interval.as_millis()) as u32;
         let players = players
             .into_iter()
             .map(|pid| (pid, PlayerState::new(starting_balance)))
@@ -165,6 +183,7 @@ impl GameState {
             config,
             players,
             current_price: 0,
+            ticks_remaining: tick_count,
         }
     }
 
@@ -226,23 +245,25 @@ impl GameState {
             },
         });
 
-        let tick_count = (self.config.game_duration.as_millis() / self.config.tick_interval.as_millis()) as u32;
-        let tick_interval = self.config.tick_interval;
+        let first_tick_effect = GameEffect::DelayedAction {
+            delay: self.config.tick_interval,
+            action: GameAction::Tick,
+        };
 
-        let timed_effects = (1..tick_count).map(move |tick| GameEffect::DelayedAction {
-            delay: tick_interval * tick,
-            action: if tick == tick_count - 1 {
-                GameAction::End
-            } else {
-                GameAction::Tick
-            },
-        });
-
-        Ok(started_notifications.chain(timed_effects).collect())
+        Ok(started_notifications.chain(std::iter::once(first_tick_effect)).collect())
     }
 
     fn handle_price_tick(&mut self) -> Result<Vec<GameEffect>, GameError> {
         self.require_phase(GamePhase::Running, "PriceTick")?;
+
+        if self.ticks_remaining == 0 {
+            return Err(GameError::InvalidPhase {
+                action: "PriceTick",
+                phase: GamePhase::Ended,
+            });
+        }
+
+        self.ticks_remaining -= 1;
 
         let mut rng = rand::thread_rng();
         let delta = rng.gen_range(-self.config.max_price_delta..=self.config.max_price_delta);
@@ -266,9 +287,21 @@ impl GameState {
             event: GameEvent::AskFilled { player_id, ask_value },
         });
 
+        let next_action = if self.ticks_remaining == 0 {
+            GameAction::End
+        } else {
+            GameAction::Tick
+        };
+
+        let next_tick_effect = GameEffect::DelayedAction {
+            delay: self.config.tick_interval,
+            action: next_action,
+        };
+
         let effects: Vec<GameEffect> = price_notifications
             .chain(bid_notifications)
             .chain(ask_notifications)
+            .chain(std::iter::once(next_tick_effect))
             .collect();
 
         Ok(effects)
@@ -894,8 +927,8 @@ mod tests {
     fn test_price_stays_non_negative() {
         let mut t = TestHarness::new(1).at_price(0);
 
-        // Run many ticks to test that price never goes negative
-        for _ in 0..100 {
+        // Run ticks until exhausted (10 ticks in test config)
+        while t.game.ticks_remaining > 0 {
             t.tick();
             assert!(
                 t.game.current_price >= 0,
@@ -903,5 +936,57 @@ mod tests {
                 t.game.current_price
             );
         }
+    }
+
+    #[test]
+    fn test_tick_decrements_remaining() {
+        let mut t = TestHarness::new(1).at_price(50);
+        let initial_ticks = t.game.ticks_remaining;
+
+        t.tick();
+        t.check_ok();
+
+        assert_eq!(
+            t.game.ticks_remaining,
+            initial_ticks - 1,
+            "Tick should decrement ticks_remaining"
+        );
+    }
+
+    #[test]
+    fn test_tick_schedules_next_tick() {
+        let mut t = TestHarness::new(1).at_price(50);
+        // With 10 ticks remaining, should schedule another Tick
+        assert!(t.game.ticks_remaining > 1);
+
+        t.tick();
+        t.check_ok()
+            .check_has_delayed_action(Duration::from_secs(1), GameAction::Tick);
+    }
+
+    #[test]
+    fn test_final_tick_schedules_end() {
+        let mut t = TestHarness::new(1).at_price(50);
+        // Consume all but one tick
+        while t.game.ticks_remaining > 1 {
+            t.tick();
+        }
+        assert_eq!(t.game.ticks_remaining, 1);
+
+        t.tick();
+        t.check_ok().check_has_delayed_action(Duration::from_secs(1), GameAction::End);
+    }
+
+    #[test]
+    fn test_tick_with_zero_remaining_fails() {
+        let mut t = TestHarness::new(1).at_price(50);
+        // Consume all ticks
+        while t.game.ticks_remaining > 0 {
+            t.tick();
+        }
+
+        // Attempting another tick should fail
+        t.tick();
+        t.check_outcome(ExpectedOutcome::InvalidPhase { action: "PriceTick" });
     }
 }

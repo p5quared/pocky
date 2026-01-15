@@ -102,30 +102,39 @@ fn process_effects<N: GameEventNotifier + 'static>(
         match effect {
             GameEffect::Notify { player_id, event } => {
                 let notification = match event {
-                    GameEvent::Countdown(remaining) => {
-                        GameNotification::Countdown { game_id, remaining }
-                    }
-                    GameEvent::GameStarted { starting_price, starting_balance, players } => {
-                        GameNotification::GameStarted { game_id, starting_price, starting_balance, players }
-                    }
-                    GameEvent::PriceChanged(price) => {
-                        GameNotification::PriceChanged { game_id, price }
-                    }
-                    GameEvent::BidPlaced { player_id, bid_value } => {
-                        GameNotification::BidPlaced { game_id, player_id, bid_value }
-                    }
-                    GameEvent::AskPlaced { player_id, ask_value } => {
-                        GameNotification::AskPlaced { game_id, player_id, ask_value }
-                    }
-                    GameEvent::BidFilled { player_id, bid_value } => {
-                        GameNotification::BidFilled { game_id, player_id, bid_value }
-                    }
-                    GameEvent::AskFilled { player_id, ask_value } => {
-                        GameNotification::AskFilled { game_id, player_id, ask_value }
-                    }
-                    GameEvent::GameEnded => {
-                        GameNotification::GameEnded { game_id }
-                    }
+                    GameEvent::Countdown(remaining) => GameNotification::Countdown { game_id, remaining },
+                    GameEvent::GameStarted {
+                        starting_price,
+                        starting_balance,
+                        players,
+                    } => GameNotification::GameStarted {
+                        game_id,
+                        starting_price,
+                        starting_balance,
+                        players,
+                    },
+                    GameEvent::PriceChanged(price) => GameNotification::PriceChanged { game_id, price },
+                    GameEvent::BidPlaced { player_id, bid_value } => GameNotification::BidPlaced {
+                        game_id,
+                        player_id,
+                        bid_value,
+                    },
+                    GameEvent::AskPlaced { player_id, ask_value } => GameNotification::AskPlaced {
+                        game_id,
+                        player_id,
+                        ask_value,
+                    },
+                    GameEvent::BidFilled { player_id, bid_value } => GameNotification::BidFilled {
+                        game_id,
+                        player_id,
+                        bid_value,
+                    },
+                    GameEvent::AskFilled { player_id, ask_value } => GameNotification::AskFilled {
+                        game_id,
+                        player_id,
+                        ask_value,
+                    },
+                    GameEvent::GameEnded => GameNotification::GameEnded { game_id },
                 };
                 let notifier = Arc::clone(&notifier);
                 tokio::spawn(async move {

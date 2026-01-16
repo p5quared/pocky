@@ -1,10 +1,11 @@
 use std::io;
 use std::time::{Duration, Instant};
 
+use clap::Parser;
 use crossterm::{
     event::{Event, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
@@ -19,10 +20,20 @@ use events::AppEvent;
 use ws::{GameNotification, MatchmakingMessage, OutgoingMessage, ServerMessage};
 
 const TICK_RATE: Duration = Duration::from_millis(100);
-const WS_URL: &str = "ws://localhost:3000/ws";
+
+#[derive(Parser)]
+#[command(name = "tui")]
+struct Args {
+    /// Server hostname to connect to
+    #[arg(long, default_value = "localhost")]
+    host: String,
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let args = Args::parse();
+    let ws_url = format!("ws://{}:3000/ws", args.host);
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -41,7 +52,7 @@ async fn main() -> io::Result<()> {
     // Spawn WebSocket task
     let ws_event_tx = event_tx.clone();
     tokio::spawn(async move {
-        ws::websocket_loop(WS_URL, ws_rx, ws_event_tx).await;
+        ws::websocket_loop(&ws_url, ws_rx, ws_event_tx).await;
     });
 
     // Initialize app and auto-connect
@@ -91,14 +102,16 @@ async fn input_tick_loop(tx: mpsc::Sender<AppEvent>) {
     }
 }
 
-async fn handle_event(app: &mut App, ev: AppEvent, ws_tx: &mpsc::Sender<ws::WsCommand>) {
+async fn handle_event(
+    app: &mut App,
+    ev: AppEvent,
+    ws_tx: &mpsc::Sender<ws::WsCommand>,
+) {
     match ev {
-        AppEvent::Key(key) => {
-            match app.screen {
-                Screen::Matchmaking => handle_matchmaking_key(app, key, ws_tx).await,
-                Screen::Game => handle_game_key(app, key, ws_tx).await,
-            }
-        }
+        AppEvent::Key(key) => match app.screen {
+            Screen::Matchmaking => handle_matchmaking_key(app, key, ws_tx).await,
+            Screen::Game => handle_game_key(app, key, ws_tx).await,
+        },
         AppEvent::Tick => {
             app.tick();
         }
@@ -222,7 +235,10 @@ async fn handle_game_key(
     }
 }
 
-fn handle_server_message(app: &mut App, msg: ServerMessage) {
+fn handle_server_message(
+    app: &mut App,
+    msg: ServerMessage,
+) {
     match msg {
         ServerMessage::Game(notification) => {
             handle_game_notification(app, notification);
@@ -233,7 +249,10 @@ fn handle_server_message(app: &mut App, msg: ServerMessage) {
     }
 }
 
-fn handle_game_notification(app: &mut App, notification: GameNotification) {
+fn handle_game_notification(
+    app: &mut App,
+    notification: GameNotification,
+) {
     match notification {
         GameNotification::Countdown { remaining, .. } => {
             app.countdown = Some(remaining);
@@ -258,7 +277,9 @@ fn handle_game_notification(app: &mut App, notification: GameNotification) {
                 game.add_price(price);
             }
         }
-        GameNotification::BidPlaced { player_id, bid_value, .. } => {
+        GameNotification::BidPlaced {
+            player_id, bid_value, ..
+        } => {
             if let Some(ref mut game) = app.game {
                 let is_self = app.player_id == Some(player_id);
                 let msg = if is_self {
@@ -270,7 +291,9 @@ fn handle_game_notification(app: &mut App, notification: GameNotification) {
                 game.log_event(msg);
             }
         }
-        GameNotification::AskPlaced { player_id, ask_value, .. } => {
+        GameNotification::AskPlaced {
+            player_id, ask_value, ..
+        } => {
             if let Some(ref mut game) = app.game {
                 let is_self = app.player_id == Some(player_id);
                 let msg = if is_self {
@@ -282,7 +305,9 @@ fn handle_game_notification(app: &mut App, notification: GameNotification) {
                 game.log_event(msg);
             }
         }
-        GameNotification::BidFilled { player_id, bid_value, .. } => {
+        GameNotification::BidFilled {
+            player_id, bid_value, ..
+        } => {
             if let Some(ref mut game) = app.game {
                 let is_self = app.player_id == Some(player_id);
                 if is_self {
@@ -295,7 +320,9 @@ fn handle_game_notification(app: &mut App, notification: GameNotification) {
                 }
             }
         }
-        GameNotification::AskFilled { player_id, ask_value, .. } => {
+        GameNotification::AskFilled {
+            player_id, ask_value, ..
+        } => {
             if let Some(ref mut game) = app.game {
                 let is_self = app.player_id == Some(player_id);
                 if is_self {
@@ -317,7 +344,10 @@ fn handle_game_notification(app: &mut App, notification: GameNotification) {
     }
 }
 
-fn handle_matchmaking_message(app: &mut App, msg: MatchmakingMessage) {
+fn handle_matchmaking_message(
+    app: &mut App,
+    msg: MatchmakingMessage,
+) {
     match msg {
         MatchmakingMessage::Enqueued(player_id) => {
             if !app.queue_players.contains(&player_id) {

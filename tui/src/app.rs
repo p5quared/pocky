@@ -79,7 +79,10 @@ impl GameState {
         }
     }
 
-    pub fn log_event(&mut self, event: String) {
+    pub fn log_event(
+        &mut self,
+        event: String,
+    ) {
         self.event_log.push(event);
         // Keep only last 50 events
         if self.event_log.len() > 50 {
@@ -87,7 +90,10 @@ impl GameState {
         }
     }
 
-    pub fn add_price(&mut self, price: i32) {
+    pub fn add_price(
+        &mut self,
+        price: i32,
+    ) {
         self.time_index += 1;
         self.current_price = price;
         self.price_history.push((self.time_index as f64, price as f64));
@@ -180,13 +186,11 @@ impl App {
     }
 
     pub fn can_join_queue(&self) -> bool {
-        matches!(self.connection, ConnectionState::Connected)
-            && matches!(self.queue, QueueState::Idle)
+        matches!(self.connection, ConnectionState::Connected) && matches!(self.queue, QueueState::Idle)
     }
 
     pub fn can_leave_queue(&self) -> bool {
-        matches!(self.connection, ConnectionState::Connected)
-            && matches!(self.queue, QueueState::InQueue)
+        matches!(self.connection, ConnectionState::Connected) && matches!(self.queue, QueueState::InQueue)
     }
 
     pub fn queue_elapsed(&self) -> Option<String> {

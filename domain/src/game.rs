@@ -52,8 +52,8 @@ impl Default for GameConfig {
 pub struct PlayerState {
     cash: i32,
     shares: Vec<i32>,
-    pending_bids: Vec<i32>,
-    pending_asks: Vec<i32>,
+    open_bids: Vec<i32>,
+    open_asks: Vec<i32>,
 }
 
 impl PlayerState {
@@ -61,17 +61,17 @@ impl PlayerState {
         Self {
             cash: starting_cash,
             shares: Vec::new(),
-            pending_bids: Vec::new(),
-            pending_asks: Vec::new(),
+            open_bids: Vec::new(),
+            open_asks: Vec::new(),
         }
     }
 
     fn available_cash(&self) -> i32 {
-        self.cash - self.pending_bids.iter().sum::<i32>()
+        self.cash - self.open_bids.iter().sum::<i32>()
     }
 
     fn available_shares(&self) -> usize {
-        self.shares.len().saturating_sub(self.pending_asks.len())
+        self.shares.len().saturating_sub(self.open_asks.len())
     }
 
     #[allow(dead_code)]
@@ -328,7 +328,7 @@ impl GameState {
         let mut resolved = Vec::new();
         for (player_id, state) in &mut self.players {
             let filled_indices: Vec<usize> = state
-                .pending_bids
+                .open_bids
                 .iter()
                 .enumerate()
                 .filter(|(_, bid)| can_fill_bid(**bid))
@@ -336,7 +336,7 @@ impl GameState {
                 .collect();
 
             for i in filled_indices.into_iter().rev() {
-                let bid_value = state.pending_bids.remove(i);
+                let bid_value = state.open_bids.remove(i);
                 state.shares.push(current_price);
                 state.cash -= current_price;
                 resolved.push((*player_id, bid_value));
@@ -364,7 +364,7 @@ impl GameState {
         }
 
         if let Some(state) = self.players.get_mut(&player_id) {
-            state.pending_bids.push(bid_value);
+            state.open_bids.push(bid_value);
         }
 
         Ok(self
@@ -395,7 +395,7 @@ impl GameState {
         }
 
         if let Some(state) = self.players.get_mut(&player_id) {
-            state.pending_asks.push(ask_value);
+            state.open_asks.push(ask_value);
         }
 
         Ok(self
@@ -415,7 +415,7 @@ impl GameState {
 
         for (player_id, state) in &mut self.players {
             let filled_indices: Vec<usize> = state
-                .pending_asks
+                .open_asks
                 .iter()
                 .enumerate()
                 .filter(|(_, ask)| can_resolve_ask(**ask))
@@ -423,7 +423,7 @@ impl GameState {
                 .collect();
 
             for i in filled_indices.into_iter().rev() {
-                let ask_value = state.pending_asks.remove(i);
+                let ask_value = state.open_asks.remove(i);
                 if !state.shares.is_empty() {
                     state.shares.pop();
                 }
@@ -619,7 +619,7 @@ mod tests {
             }
 
             if let Some(expected_bids) = expected.bids {
-                let actual = state.pending_bids.len();
+                let actual = state.open_bids.len();
                 assert_eq!(
                     actual, expected_bids,
                     "Player {}: expected {} pending bids, got {}",
@@ -628,7 +628,7 @@ mod tests {
             }
 
             if let Some(expected_asks) = expected.asks {
-                let actual = state.pending_asks.len();
+                let actual = state.open_asks.len();
                 assert_eq!(
                     actual, expected_asks,
                     "Player {}: expected {} pending asks, got {}",

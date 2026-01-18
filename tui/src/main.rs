@@ -28,12 +28,20 @@ struct Args {
     /// Server hostname to connect to
     #[arg(long, default_value = "localhost")]
     host: String,
+
+    /// Use secure WebSocket (wss://) connection
+    #[arg(long, short)]
+    secure: bool,
 }
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args = Args::parse();
-    let ws_url = format!("ws://{}:3000/ws", args.host);
+    let ws_url = if args.secure {
+        format!("wss://{}/ws", args.host)
+    } else {
+        format!("ws://{}:8080/ws", args.host)
+    };
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

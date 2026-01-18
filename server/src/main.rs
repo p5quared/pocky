@@ -11,10 +11,11 @@ async fn main() {
 
     let app = Router::new()
         .route("/ws", get(handle_connection))
+        .route("/ping", get(|| async { "pong" }))
         .with_state(create_app_state());
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    info!("Server listening on 0.0.0.0:3000");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    info!("Server listening on 0.0.0.0:8080");
     axum::serve(listener, app).await.unwrap();
     info!("Server shut down");
 }

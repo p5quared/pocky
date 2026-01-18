@@ -83,6 +83,27 @@ impl PlayerState {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Ticker {
+    base_volatility: i32,
+    base_pressure: i32,
+}
+
+impl Ticker {
+    pub fn new(base_volatility: i32) -> Self {
+        Self {
+            base_volatility,
+            base_pressure: 0,
+        }
+    }
+
+    pub fn next_delta(&self) -> i32 {
+        let mut rng = rand::thread_rng();
+        let base = rng.gen_range(-self.base_volatility..=self.base_volatility);
+        base + self.base_pressure
+    }
+}
+
 #[derive(Clone)]
 pub struct GameState {
     phase: GamePhase,
@@ -90,6 +111,7 @@ pub struct GameState {
     current_price: i32,
     players: HashMap<PlayerId, PlayerState>,
     ticks_remaining: u32,
+    ticker: Ticker,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -178,12 +200,14 @@ impl GameState {
             .into_iter()
             .map(|pid| (pid, PlayerState::new(starting_balance)))
             .collect();
+        let ticker = Ticker::new(config.max_price_delta);
         Self {
             phase: GamePhase::Pending,
             config,
             players,
             current_price: 0,
             ticks_remaining: tick_count,
+            ticker,
         }
     }
 
@@ -265,9 +289,7 @@ impl GameState {
 
         self.ticks_remaining -= 1;
 
-        let mut rng = rand::thread_rng();
-        let delta = rng.gen_range(-self.config.max_price_delta..=self.config.max_price_delta);
-        self.current_price = (self.current_price + delta).max(0);
+        self.current_price = (self.current_price + self.ticker.next_delta()).max(0);
 
         let resolved_bids = self.resolve_bids();
         let resolved_asks = self.resolve_asks();

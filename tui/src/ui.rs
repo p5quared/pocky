@@ -3,10 +3,11 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     symbols,
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph},
+    widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph},
 };
 
 use crate::app::{App, ButtonFocus, ConnectionState, GameButtonFocus, GamePhase, QueueState, Screen};
+use crate::theme;
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -48,10 +49,12 @@ fn render_title(
     frame: &mut Frame,
     area: Rect,
 ) {
-    let title = Paragraph::new("MATCHMAKING")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+    let title = Paragraph::new("◀ MATCHMAKING ▶")
+        .style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM));
+        .block(Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)));
     frame.render_widget(title, area);
 }
 
@@ -65,20 +68,20 @@ fn render_status_bar(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    let (status_text, status_color) = match &app.connection {
-        ConnectionState::Disconnected => ("● Disconnected", Color::Red),
-        ConnectionState::Connecting => ("◐ Connecting...", Color::Yellow),
-        ConnectionState::Connected => ("● Connected", Color::Green),
+    let (status_icon, status_text, status_color) = match &app.connection {
+        ConnectionState::Disconnected => ("●", "DISCONNECTED", theme::RED),
+        ConnectionState::Connecting => ("◐", "CONNECTING...", theme::AMBER),
+        ConnectionState::Connected => ("●", "ONLINE", theme::GREEN),
     };
 
-    let status = Paragraph::new(format!("Status: {}", status_text))
-        .style(Style::default().fg(status_color))
+    let status = Paragraph::new(format!("STATUS: {} {}", status_icon, status_text))
+        .style(Style::default().fg(status_color).add_modifier(Modifier::BOLD))
         .block(Block::default().borders(Borders::NONE));
     frame.render_widget(status, chunks[0]);
 
     if let Some(elapsed) = app.queue_elapsed() {
-        let time = Paragraph::new(format!("Queue Time: {}", elapsed))
-            .style(Style::default().fg(Color::White))
+        let time = Paragraph::new(format!("QUEUE: {}", elapsed))
+            .style(Style::default().fg(theme::YELLOW_DATA))
             .alignment(Alignment::Right)
             .block(Block::default().borders(Borders::NONE));
         frame.render_widget(time, chunks[1]);
@@ -93,9 +96,9 @@ fn render_queue_list(
     let spinner = SPINNER_FRAMES[app.animation_tick % SPINNER_FRAMES.len()];
 
     let title = if matches!(app.queue, QueueState::InQueue) {
-        format!(" Players in Queue ({}) {} ", app.queue_players.len(), spinner)
+        format!("[ QUEUE ({}) {} ]", app.queue_players.len(), spinner)
     } else {
-        " Players in Queue ".to_string()
+        format!("[ QUEUE ({}) ]", app.queue_players.len())
     };
 
     let items: Vec<ListItem> = app
@@ -104,12 +107,13 @@ fn render_queue_list(
         .enumerate()
         .map(|(i, player_id)| {
             let is_self = app.player_id == Some(*player_id);
-            let suffix = if is_self { " (you)" } else { "" };
+            let prefix = if is_self { "▶" } else { " " };
+            let suffix = if is_self { "(YOU)" } else { "" };
             let uuid_str = player_id.0.to_string();
             let short_id = &uuid_str[..8];
-            let text = format!("{}. {}...{}", i + 1, short_id, suffix);
+            let text = format!("{} {:>2}. {}... {}", prefix, i + 1, short_id, suffix);
             let style = if is_self {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::ORANGE_BRIGHT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -120,8 +124,10 @@ fn render_queue_list(
     let list = List::new(items).block(
         Block::default()
             .title(title)
+            .title_style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(theme::BORDER_ACTIVE)),
     );
 
     frame.render_widget(list, area);
@@ -148,9 +154,9 @@ fn render_buttons(
     let join_enabled = app.can_join_queue();
     let join_selected = app.selected_button == ButtonFocus::JoinQueue;
     let join_text = if matches!(app.queue, QueueState::Joining) {
-        format!("Joining... {}", spinner)
+        format!("<ENTER> JOINING... {}", spinner)
     } else {
-        "Join Queue".to_string()
+        "<ENTER> JOIN".to_string()
     };
     render_button(frame, chunks[0], &join_text, join_selected, join_enabled);
 
@@ -158,15 +164,15 @@ fn render_buttons(
     let leave_enabled = app.can_leave_queue();
     let leave_selected = app.selected_button == ButtonFocus::LeaveQueue;
     let leave_text = if matches!(app.queue, QueueState::Leaving) {
-        format!("Leaving... {}", spinner)
+        format!("<L> LEAVING... {}", spinner)
     } else {
-        "Leave Queue".to_string()
+        "<L> LEAVE".to_string()
     };
     render_button(frame, chunks[1], &leave_text, leave_selected, leave_enabled);
 
     // Quit button
     let quit_selected = app.selected_button == ButtonFocus::Quit;
-    render_button(frame, chunks[2], "Quit", quit_selected, true);
+    render_button(frame, chunks[2], "<ESC> QUIT", quit_selected, true);
 }
 
 fn render_button(
@@ -177,17 +183,17 @@ fn render_button(
     enabled: bool,
 ) {
     let style = if !enabled {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_DIM)
     } else if selected {
-        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Black).bg(theme::ORANGE).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(theme::TEXT_SECONDARY)
     };
 
     let border_style = if selected && enabled {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme::ORANGE_BRIGHT)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::BORDER_INACTIVE)
     };
 
     let button = Paragraph::new(text)
@@ -203,15 +209,25 @@ fn render_footer(
     area: Rect,
     app: &App,
 ) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
     let text = if let Some(ref error) = app.error_message {
-        Paragraph::new(format!("Error: {}", error)).style(Style::default().fg(Color::Red))
+        Paragraph::new(format!("ERROR: {}", error.to_uppercase()))
+            .style(Style::default().fg(theme::RED).add_modifier(Modifier::BOLD))
     } else if matches!(app.queue, QueueState::Matched) {
-        Paragraph::new("Match found! Starting game...").style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        Paragraph::new(">>> MATCH FOUND - STARTING GAME <<<")
+            .style(Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD))
     } else {
-        Paragraph::new("Press Enter to select, Tab to navigate, Q to quit").style(Style::default().fg(Color::DarkGray))
+        Paragraph::new("TAB=Navigate | ENTER=Select | ESC=Quit")
+            .style(Style::default().fg(theme::TEXT_DIM))
     };
 
-    frame.render_widget(text.alignment(Alignment::Center), area);
+    frame.render_widget(text.alignment(Alignment::Center), inner);
 }
 
 fn draw_game(
@@ -255,21 +271,23 @@ fn render_game_title(
     app: &App,
 ) {
     let title_text = if let Some(countdown) = app.countdown {
-        format!("GAME STARTING IN {}...", countdown)
+        format!("[ STARTING IN {}... ]", countdown)
     } else if let Some(ref game) = app.game {
         match game.phase {
-            GamePhase::Running => "TRADING".to_string(),
-            GamePhase::Ended => "GAME OVER".to_string(),
-            GamePhase::Countdown(n) => format!("STARTING IN {}...", n),
+            GamePhase::Running => "◀ TRADING ▶".to_string(),
+            GamePhase::Ended => "[ GAME OVER ]".to_string(),
+            GamePhase::Countdown(n) => format!("[ STARTING IN {}... ]", n),
         }
     } else {
-        "LOADING...".to_string()
+        "[ LOADING... ]".to_string()
     };
 
     let title = Paragraph::new(title_text)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::BOTTOM));
+        .block(Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)));
     frame.render_widget(title, area);
 }
 
@@ -278,41 +296,53 @@ fn render_price_chart(
     area: Rect,
     app: &App,
 ) {
-    let (data, x_bounds, y_bounds) = if let Some(ref game) = app.game {
+    let (data, x_bounds, y_bounds, price_up) = if let Some(ref game) = app.game {
         let x_bounds = game.time_bounds();
         let y_bounds = game.price_bounds();
-        (game.price_history.clone(), x_bounds, y_bounds)
+        let price_up = if game.price_history.len() >= 2 {
+            let last = game.price_history.last().map(|(_, p)| *p).unwrap_or(0.0);
+            let first = game.price_history.first().map(|(_, p)| *p).unwrap_or(0.0);
+            last >= first
+        } else {
+            true
+        };
+        (game.price_history.clone(), x_bounds, y_bounds, price_up)
     } else {
-        (vec![(0.0, 100.0)], (0.0, 10.0), (50.0, 150.0))
+        (vec![(0.0, 100.0)], (0.0, 10.0), (50.0, 150.0), true)
     };
+
+    // Line color based on price direction
+    let line_color = if price_up { theme::GREEN } else { theme::RED };
 
     let datasets = vec![
         Dataset::default()
-            .name("Price")
+            .name("PRICE")
             .marker(symbols::Marker::Braille)
             .graph_type(GraphType::Line)
-            .style(Style::default().fg(Color::Cyan))
+            .style(Style::default().fg(line_color))
             .data(&data),
     ];
 
     let chart = Chart::new(datasets)
         .block(
             Block::default()
-                .title(" Price Chart ")
+                .title("[ PRICE CHART ]")
+                .title_style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::White)),
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(theme::BORDER_ACTIVE)),
         )
         .x_axis(
             Axis::default()
-                .title("Time")
-                .style(Style::default().fg(Color::Gray))
+                .title("TIME")
+                .style(Style::default().fg(theme::TEXT_DIM))
                 .bounds([x_bounds.0, x_bounds.1])
                 .labels([format!("{:.0}", x_bounds.0), format!("{:.0}", x_bounds.1)]),
         )
         .y_axis(
             Axis::default()
-                .title("Price")
-                .style(Style::default().fg(Color::Gray))
+                .title("$")
+                .style(Style::default().fg(theme::TEXT_DIM))
                 .bounds([y_bounds.0, y_bounds.1])
                 .labels([
                     format!("{:.0}", y_bounds.0),
@@ -332,39 +362,80 @@ fn render_game_info(
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
         ])
         .split(area);
 
     if let Some(ref game) = app.game {
-        let price_text = format!("${}", game.current_price);
-        let price = Paragraph::new(price_text)
-            .style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title(" Price "));
-        frame.render_widget(price, chunks[0]);
+        // Calculate price change
+        let (price_change, price_up) = if game.price_history.len() >= 2 {
+            let last = game.price_history.last().map(|(_, p)| *p).unwrap_or(0.0);
+            let first = game.price_history.first().map(|(_, p)| *p).unwrap_or(0.0);
+            if first > 0.0 {
+                let pct = ((last - first) / first) * 100.0;
+                (pct, last >= first)
+            } else {
+                (0.0, true)
+            }
+        } else {
+            (0.0, true)
+        };
 
+        let arrow = if price_up { "▲" } else { "▼" };
+        let price_color = if price_up { theme::GREEN } else { theme::RED };
+        let price_text = format!("${} {} {:.1}%", game.current_price, arrow, price_change.abs());
+
+        render_info_box(frame, chunks[0], "PRICE", &price_text, price_color);
+
+        // Balance
         let balance_text = format!("${}", game.balance);
-        let balance = Paragraph::new(balance_text)
-            .style(Style::default().fg(Color::Yellow))
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title(" Balance "));
-        frame.render_widget(balance, chunks[1]);
+        render_info_box(frame, chunks[1], "BALANCE", &balance_text, theme::YELLOW_DATA);
 
+        // Shares
         let shares_text = format!("{}", game.shares);
-        let shares = Paragraph::new(shares_text)
-            .style(Style::default().fg(Color::Magenta))
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).title(" Shares "));
-        frame.render_widget(shares, chunks[2]);
+        render_info_box(frame, chunks[2], "SHARES", &shares_text, Color::White);
+
+        // P/L calculation: current value - starting balance
+        let current_value = game.balance as i64 + (game.shares as i64 * game.current_price as i64);
+        let starting_value = game.starting_balance as i64;
+        let pnl = current_value - starting_value;
+        let pnl_color = if pnl >= 0 { theme::GREEN } else { theme::RED };
+        let pnl_sign = if pnl >= 0 { "+" } else { "" };
+        let pnl_text = format!("{}${}", pnl_sign, pnl);
+        render_info_box(frame, chunks[3], "P/L", &pnl_text, pnl_color);
     } else {
         let waiting = Paragraph::new("Waiting for game to start...")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme::TEXT_DIM))
             .alignment(Alignment::Center);
         frame.render_widget(waiting, area);
     }
+}
+
+fn render_info_box(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    value_color: Color,
+) {
+    let block = Block::default()
+        .title(format!(" {} ", label))
+        .title_style(Style::default().fg(theme::TEXT_DIM))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let value_widget = Paragraph::new(value)
+        .style(Style::default().fg(value_color).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(value_widget, inner);
 }
 
 fn render_event_log(
@@ -379,14 +450,16 @@ fn render_event_log(
             .take(20)
             .rev()
             .map(|event| {
-                let style = if event.contains("filled") {
-                    Style::default().fg(Color::Green)
+                let (prefix, style) = if event.contains("filled") {
+                    ("✓", Style::default().fg(theme::GREEN))
                 } else if event.contains("placed") {
-                    Style::default().fg(Color::Yellow)
+                    ("→", Style::default().fg(theme::AMBER))
+                } else if event.contains("started") || event.contains("ended") {
+                    ("●", Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
                 } else {
-                    Style::default().fg(Color::Gray)
+                    ("·", Style::default().fg(theme::TEXT_SECONDARY))
                 };
-                ListItem::new(format!("> {}", event)).style(style)
+                ListItem::new(format!(" {} {}", prefix, event)).style(style)
             })
             .collect()
     } else {
@@ -395,9 +468,11 @@ fn render_event_log(
 
     let list = List::new(events).block(
         Block::default()
-            .title(" Event Log ")
+            .title("[ EVENT LOG ]")
+            .title_style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::White)),
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
     );
 
     frame.render_widget(list, area);
@@ -416,11 +491,11 @@ fn render_game_buttons(
 
     let buy_enabled = app.can_buy();
     let buy_selected = app.game_button == GameButtonFocus::Buy;
-    render_button(frame, chunks[0], "BUY (B)", buy_selected, buy_enabled);
+    render_button(frame, chunks[0], "<B> BUY", buy_selected, buy_enabled);
 
     let sell_enabled = app.can_sell();
     let sell_selected = app.game_button == GameButtonFocus::Sell;
-    render_button(frame, chunks[1], "SELL (S)", sell_selected, sell_enabled);
+    render_button(frame, chunks[1], "<S> SELL", sell_selected, sell_enabled);
 }
 
 fn render_game_footer(
@@ -430,8 +505,8 @@ fn render_game_footer(
 ) {
     let text = if let Some(ref game) = app.game {
         match game.phase {
-            GamePhase::Ended => "Press Q to return to matchmaking",
-            GamePhase::Running => "B to buy, S to sell, Tab to switch, Q to quit",
+            GamePhase::Ended => "Q=Return to matchmaking",
+            GamePhase::Running => "B=Buy | S=Sell | TAB=Switch | Q=Quit",
             GamePhase::Countdown(_) => "Get ready!",
         }
     } else if app.countdown.is_some() {
@@ -441,7 +516,7 @@ fn render_game_footer(
     };
 
     let footer = Paragraph::new(text)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(theme::TEXT_DIM))
         .alignment(Alignment::Center);
     frame.render_widget(footer, area);
 }

@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 
 mod app;
 mod events;
+mod theme;
 mod ui;
 mod ws;
 

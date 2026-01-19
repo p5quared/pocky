@@ -477,14 +477,25 @@ impl GameState {
             event: GameEvent::PriceChanged(self.current_price),
         });
 
-        let bid_notifications = resolved_bids.into_iter().map(|(player_id, bid_value)| GameEffect::Notify {
-            player_id,
-            event: GameEvent::BidFilled { player_id, bid_value },
+        let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
+        let bid_notifications = resolved_bids.into_iter().flat_map(|(order_owner, bid_value)| {
+            player_ids.iter().map(move |&notify_player| GameEffect::Notify {
+                player_id: notify_player,
+                event: GameEvent::BidFilled {
+                    player_id: order_owner,
+                    bid_value,
+                },
+            })
         });
 
-        let ask_notifications = resolved_asks.into_iter().map(|(player_id, ask_value)| GameEffect::Notify {
-            player_id,
-            event: GameEvent::AskFilled { player_id, ask_value },
+        let ask_notifications = resolved_asks.into_iter().flat_map(|(order_owner, ask_value)| {
+            player_ids.iter().map(move |&notify_player| GameEffect::Notify {
+                player_id: notify_player,
+                event: GameEvent::AskFilled {
+                    player_id: order_owner,
+                    ask_value,
+                },
+            })
         });
 
         let next_action = if self.ticks_remaining == 0 {

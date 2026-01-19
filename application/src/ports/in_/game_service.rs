@@ -134,7 +134,10 @@ fn process_effects<N: GameEventNotifier + 'static>(
                         player_id,
                         ask_value,
                     },
-                    GameEvent::GameEnded => GameNotification::GameEnded { game_id },
+                    GameEvent::GameEnded { final_balances } => GameNotification::GameEnded {
+                        game_id,
+                        final_balances,
+                    },
                 };
                 let notifier = Arc::clone(&notifier);
                 tokio::spawn(async move {

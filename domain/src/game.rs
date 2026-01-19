@@ -74,7 +74,6 @@ impl PlayerState {
         self.shares.len().saturating_sub(self.open_asks.len())
     }
 
-    #[allow(dead_code)]
     fn net_worth(
         &self,
         current_price: i32,
@@ -325,7 +324,9 @@ pub enum GameEvent {
         player_id: PlayerId,
         ask_value: i32,
     },
-    GameEnded,
+    GameEnded {
+        final_balances: Vec<(PlayerId, i32)>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -510,12 +511,20 @@ impl GameState {
         self.require_phase(GamePhase::Running, "End")?;
         self.phase = GamePhase::Ended;
 
+        let final_balances: Vec<(PlayerId, i32)> = self
+            .players
+            .iter()
+            .map(|(&player_id, state)| (player_id, state.net_worth(self.current_price)))
+            .collect();
+
         Ok(self
             .players
             .keys()
             .map(|&player_id| GameEffect::Notify {
                 player_id,
-                event: GameEvent::GameEnded,
+                event: GameEvent::GameEnded {
+                    final_balances: final_balances.clone(),
+                },
             })
             .collect())
     }
@@ -1102,7 +1111,7 @@ mod tests {
         let mut t = TestHarness::new(2).at_price(50);
 
         t.end();
-        t.check_ok().check_all_notified(|e| matches!(e, GameEvent::GameEnded));
+        t.check_ok().check_all_notified(|e| matches!(e, GameEvent::GameEnded { .. }));
     }
 
     #[test]

@@ -54,6 +54,7 @@ pub enum GameNotification {
     },
     GameEnded {
         game_id: GameId,
+        final_balances: Vec<(PlayerId, i32)>,
     },
 }
 

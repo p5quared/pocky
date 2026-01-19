@@ -38,9 +38,17 @@ pub enum GamePhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GameButtonFocus {
-    Buy,
-    Sell,
+pub enum OrderType {
+    Bid,
+    Ask,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenOrder {
+    pub order_type: OrderType,
+    pub price: i32,
+    pub player_id: PlayerId,
+    pub is_own: bool,
 }
 
 pub struct GameState {
@@ -54,7 +62,8 @@ pub struct GameState {
     pub players: Vec<PlayerId>,
     pub price_history: Vec<(f64, f64)>,
     pub time_index: usize,
-    pub event_log: Vec<String>,
+    pub cursor_price: i32,
+    pub open_orders: Vec<OpenOrder>,
 }
 
 impl GameState {
@@ -75,18 +84,42 @@ impl GameState {
             players,
             price_history: vec![(0.0, starting_price as f64)],
             time_index: 0,
-            event_log: Vec::new(),
+            cursor_price: starting_price,
+            open_orders: Vec::new(),
         }
     }
 
-    pub fn log_event(
+    pub fn move_cursor_up(&mut self) {
+        let (min, max) = self.price_bounds();
+        let step = ((max - min) * 0.02).max(1.0) as i32;
+        self.cursor_price += step;
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let (min, max) = self.price_bounds();
+        let step = ((max - min) * 0.02).max(1.0) as i32;
+        self.cursor_price = (self.cursor_price - step).max(1);
+    }
+
+    pub fn add_order(
         &mut self,
-        event: String,
+        order: OpenOrder,
     ) {
-        self.event_log.push(event);
-        // Keep only last 50 events
-        if self.event_log.len() > 50 {
-            self.event_log.remove(0);
+        self.open_orders.push(order);
+    }
+
+    pub fn remove_order(
+        &mut self,
+        player_id: PlayerId,
+        price: i32,
+        order_type: OrderType,
+    ) {
+        if let Some(idx) = self
+            .open_orders
+            .iter()
+            .position(|o| o.player_id == player_id && o.price == price && o.order_type == order_type)
+        {
+            self.open_orders.remove(idx);
         }
     }
 
@@ -100,8 +133,19 @@ impl GameState {
     }
 
     pub fn price_bounds(&self) -> (f64, f64) {
-        let min = self.price_history.iter().map(|(_, p)| *p).fold(f64::INFINITY, f64::min);
-        let max = self.price_history.iter().map(|(_, p)| *p).fold(f64::NEG_INFINITY, f64::max);
+        let mut min = self.price_history.iter().map(|(_, p)| *p).fold(f64::INFINITY, f64::min);
+        let mut max = self.price_history.iter().map(|(_, p)| *p).fold(f64::NEG_INFINITY, f64::max);
+
+        // Include cursor price in bounds
+        min = min.min(self.cursor_price as f64);
+        max = max.max(self.cursor_price as f64);
+
+        // Include open orders in bounds
+        for order in &self.open_orders {
+            min = min.min(order.price as f64);
+            max = max.max(order.price as f64);
+        }
+
         let padding = (max - min).max(10.0) * 0.1;
         ((min - padding).max(0.0), max + padding)
     }
@@ -125,7 +169,6 @@ pub struct App {
     pub screen: Screen,
     pub game: Option<GameState>,
     pub countdown: Option<u32>,
-    pub game_button: GameButtonFocus,
 }
 
 impl App {
@@ -144,7 +187,6 @@ impl App {
             screen: Screen::Matchmaking,
             game: None,
             countdown: None,
-            game_button: GameButtonFocus::Buy,
         }
     }
 
@@ -155,19 +197,11 @@ impl App {
         self.queue = QueueState::Idle;
         self.queue_players.clear();
         self.matched_players = None;
-        self.game_button = GameButtonFocus::Buy;
-    }
-
-    pub fn toggle_game_button(&mut self) {
-        self.game_button = match self.game_button {
-            GameButtonFocus::Buy => GameButtonFocus::Sell,
-            GameButtonFocus::Sell => GameButtonFocus::Buy,
-        };
     }
 
     pub fn can_buy(&self) -> bool {
         if let Some(ref game) = self.game {
-            game.phase == GamePhase::Running && game.balance >= game.current_price
+            game.phase == GamePhase::Running && game.balance >= game.cursor_price
         } else {
             false
         }
@@ -175,7 +209,12 @@ impl App {
 
     pub fn can_sell(&self) -> bool {
         if let Some(ref game) = self.game {
-            game.phase == GamePhase::Running && game.shares > 0
+            let own_asks = game
+                .open_orders
+                .iter()
+                .filter(|o| o.is_own && o.order_type == OrderType::Ask)
+                .count() as i32;
+            game.phase == GamePhase::Running && game.shares > own_asks
         } else {
             false
         }

@@ -16,7 +16,7 @@ mod theme;
 mod ui;
 mod ws;
 
-use app::{App, ButtonFocus, ConnectionState, GamePhase, GameState, QueueState, Screen};
+use app::{App, ButtonFocus, ConnectionState, GamePhase, GameState, OpenOrder, OrderType, QueueState, Screen};
 use events::AppEvent;
 use ws::{GameNotification, MatchmakingMessage, OutgoingMessage, ServerMessage};
 
@@ -192,13 +192,23 @@ async fn handle_game_key(
             }
             app.should_quit = true;
         }
+        KeyCode::Up => {
+            if let Some(ref mut game) = app.game {
+                game.move_cursor_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut game) = app.game {
+                game.move_cursor_down();
+            }
+        }
         KeyCode::Char('b') | KeyCode::Char('B') => {
             if app.can_buy() {
                 if let Some(ref game) = app.game {
                     let _ = ws_tx
                         .send(ws::WsCommand::Send(OutgoingMessage::PlaceBid {
                             game_id: game.game_id,
-                            value: game.current_price,
+                            value: game.cursor_price,
                         }))
                         .await;
                 }
@@ -210,31 +220,7 @@ async fn handle_game_key(
                     let _ = ws_tx
                         .send(ws::WsCommand::Send(OutgoingMessage::PlaceAsk {
                             game_id: game.game_id,
-                            value: game.current_price,
-                        }))
-                        .await;
-                }
-            }
-        }
-        KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
-            app.toggle_game_button();
-        }
-        KeyCode::Enter => {
-            if app.game_button == app::GameButtonFocus::Buy && app.can_buy() {
-                if let Some(ref game) = app.game {
-                    let _ = ws_tx
-                        .send(ws::WsCommand::Send(OutgoingMessage::PlaceBid {
-                            game_id: game.game_id,
-                            value: game.current_price,
-                        }))
-                        .await;
-                }
-            } else if app.game_button == app::GameButtonFocus::Sell && app.can_sell() {
-                if let Some(ref game) = app.game {
-                    let _ = ws_tx
-                        .send(ws::WsCommand::Send(OutgoingMessage::PlaceAsk {
-                            game_id: game.game_id,
-                            value: game.current_price,
+                            value: game.cursor_price,
                         }))
                         .await;
                 }
@@ -277,9 +263,6 @@ fn handle_game_notification(
         } => {
             app.countdown = None;
             app.game = Some(GameState::new(game_id, starting_price, starting_balance, players));
-            if let Some(ref mut game) = app.game {
-                game.log_event("Game started!".to_string());
-            }
         }
         GameNotification::PriceChanged { price, .. } => {
             if let Some(ref mut game) = app.game {
@@ -290,42 +273,37 @@ fn handle_game_notification(
             player_id, bid_value, ..
         } => {
             if let Some(ref mut game) = app.game {
-                let is_self = app.player_id == Some(player_id);
-                let msg = if is_self {
-                    format!("You placed bid at ${}", bid_value)
-                } else {
-                    let short_id = &player_id.0.to_string()[..8];
-                    format!("Player {}... placed bid at ${}", short_id, bid_value)
-                };
-                game.log_event(msg);
+                let is_own = app.player_id == Some(player_id);
+                game.add_order(OpenOrder {
+                    order_type: OrderType::Bid,
+                    price: bid_value,
+                    player_id,
+                    is_own,
+                });
             }
         }
         GameNotification::AskPlaced {
             player_id, ask_value, ..
         } => {
             if let Some(ref mut game) = app.game {
-                let is_self = app.player_id == Some(player_id);
-                let msg = if is_self {
-                    format!("You placed ask at ${}", ask_value)
-                } else {
-                    let short_id = &player_id.0.to_string()[..8];
-                    format!("Player {}... placed ask at ${}", short_id, ask_value)
-                };
-                game.log_event(msg);
+                let is_own = app.player_id == Some(player_id);
+                game.add_order(OpenOrder {
+                    order_type: OrderType::Ask,
+                    price: ask_value,
+                    player_id,
+                    is_own,
+                });
             }
         }
         GameNotification::BidFilled {
             player_id, bid_value, ..
         } => {
             if let Some(ref mut game) = app.game {
+                game.remove_order(player_id, bid_value, OrderType::Bid);
                 let is_self = app.player_id == Some(player_id);
                 if is_self {
                     game.balance -= bid_value;
                     game.shares += 1;
-                    game.log_event(format!("Your bid filled at ${}", bid_value));
-                } else {
-                    let short_id = &player_id.0.to_string()[..8];
-                    game.log_event(format!("Player {}... bid filled at ${}", short_id, bid_value));
                 }
             }
         }
@@ -333,21 +311,18 @@ fn handle_game_notification(
             player_id, ask_value, ..
         } => {
             if let Some(ref mut game) = app.game {
+                game.remove_order(player_id, ask_value, OrderType::Ask);
                 let is_self = app.player_id == Some(player_id);
                 if is_self {
                     game.balance += ask_value;
                     game.shares -= 1;
-                    game.log_event(format!("Your ask filled at ${}", ask_value));
-                } else {
-                    let short_id = &player_id.0.to_string()[..8];
-                    game.log_event(format!("Player {}... ask filled at ${}", short_id, ask_value));
                 }
             }
         }
         GameNotification::GameEnded { .. } => {
             if let Some(ref mut game) = app.game {
                 game.phase = GamePhase::Ended;
-                game.log_event("Game ended!".to_string());
+                game.open_orders.clear();
             }
         }
     }

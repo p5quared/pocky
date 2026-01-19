@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Axis, Block, BorderType, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, ButtonFocus, ConnectionState, GameButtonFocus, GamePhase, QueueState, Screen};
+use crate::app::{App, ButtonFocus, ConnectionState, GamePhase, OrderType, QueueState, Screen};
 use crate::theme;
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -52,9 +52,11 @@ fn render_title(
     let title = Paragraph::new("◀ MATCHMAKING ▶")
         .style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
     frame.render_widget(title, area);
 }
 
@@ -185,7 +187,10 @@ fn render_button(
     let style = if !enabled {
         Style::default().fg(theme::TEXT_DIM)
     } else if selected {
-        Style::default().fg(Color::Black).bg(theme::ORANGE).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(theme::ORANGE)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_SECONDARY)
     };
@@ -223,8 +228,7 @@ fn render_footer(
         Paragraph::new(">>> MATCH FOUND - STARTING GAME <<<")
             .style(Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD))
     } else {
-        Paragraph::new("TAB=Navigate | ENTER=Select | ESC=Quit")
-            .style(Style::default().fg(theme::TEXT_DIM))
+        Paragraph::new("TAB=Navigate | ENTER=Select | ESC=Quit").style(Style::default().fg(theme::TEXT_DIM))
     };
 
     frame.render_widget(text.alignment(Alignment::Center), inner);
@@ -240,29 +244,16 @@ fn draw_game(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Title/Status
-            Constraint::Min(10),   // Chart + Event Log
+            Constraint::Min(10),   // Chart (full width)
             Constraint::Length(3), // Info panel
-            Constraint::Length(3), // Buttons
             Constraint::Length(2), // Footer/Help
         ])
         .split(area);
 
     render_game_title(frame, chunks[0], app);
-
-    // Horizontal split for chart and event log
-    let chart_area = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(60), // Chart
-            Constraint::Percentage(40), // Event Log
-        ])
-        .split(chunks[1]);
-
-    render_price_chart(frame, chart_area[0], app);
-    render_event_log(frame, chart_area[1], app);
+    render_price_chart(frame, chunks[1], app);
     render_game_info(frame, chunks[2], app);
-    render_game_buttons(frame, chunks[3], app);
-    render_game_footer(frame, chunks[4], app);
+    render_game_footer(frame, chunks[3], app);
 }
 
 fn render_game_title(
@@ -285,9 +276,11 @@ fn render_game_title(
     let title = Paragraph::new(title_text)
         .style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center)
-        .block(Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
     frame.render_widget(title, area);
 }
 
@@ -296,7 +289,7 @@ fn render_price_chart(
     area: Rect,
     app: &App,
 ) {
-    let (data, x_bounds, y_bounds, price_up) = if let Some(ref game) = app.game {
+    let (data, x_bounds, y_bounds, price_up, cursor_price, open_orders) = if let Some(ref game) = app.game {
         let x_bounds = game.time_bounds();
         let y_bounds = game.price_bounds();
         let price_up = if game.price_history.len() >= 2 {
@@ -306,15 +299,41 @@ fn render_price_chart(
         } else {
             true
         };
-        (game.price_history.clone(), x_bounds, y_bounds, price_up)
+        (
+            game.price_history.clone(),
+            x_bounds,
+            y_bounds,
+            price_up,
+            game.cursor_price,
+            game.open_orders.clone(),
+        )
     } else {
-        (vec![(0.0, 100.0)], (0.0, 10.0), (50.0, 150.0), true)
+        (vec![(0.0, 100.0)], (0.0, 10.0), (50.0, 150.0), true, 100, vec![])
     };
 
     // Line color based on price direction
     let line_color = if price_up { theme::GREEN } else { theme::RED };
 
-    let datasets = vec![
+    // Create cursor line data (horizontal line across full time range)
+    let cursor_data: Vec<(f64, f64)> = vec![(x_bounds.0, cursor_price as f64), (x_bounds.1, cursor_price as f64)];
+
+    // Create order line datasets - group orders by type and price
+    let mut bid_lines: Vec<Vec<(f64, f64)>> = vec![];
+    let mut ask_lines: Vec<Vec<(f64, f64)>> = vec![];
+    let mut own_bid_lines: Vec<Vec<(f64, f64)>> = vec![];
+    let mut own_ask_lines: Vec<Vec<(f64, f64)>> = vec![];
+
+    for order in &open_orders {
+        let line_data = vec![(x_bounds.0, order.price as f64), (x_bounds.1, order.price as f64)];
+        match (order.order_type, order.is_own) {
+            (OrderType::Bid, true) => own_bid_lines.push(line_data),
+            (OrderType::Bid, false) => bid_lines.push(line_data),
+            (OrderType::Ask, true) => own_ask_lines.push(line_data),
+            (OrderType::Ask, false) => ask_lines.push(line_data),
+        }
+    }
+
+    let mut datasets = vec![
         Dataset::default()
             .name("PRICE")
             .marker(symbols::Marker::Braille)
@@ -322,6 +341,50 @@ fn render_price_chart(
             .style(Style::default().fg(line_color))
             .data(&data),
     ];
+
+    // Add cursor line (amber/yellow)
+    datasets.push(
+        Dataset::default()
+            .name("CURSOR")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(theme::AMBER))
+            .data(&cursor_data),
+    );
+
+    // We need to store the data in vectors that live long enough
+    // Since we can't store references to local data in the datasets,
+    // we need to create the datasets with owned data
+    // Ratatui's Chart requires references, so we need to collect all line data first
+
+    // For simplicity, let's create a combined approach
+    let all_order_data: Vec<(Vec<(f64, f64)>, bool, OrderType)> = open_orders
+        .iter()
+        .map(|order| {
+            let line_data = vec![(x_bounds.0, order.price as f64), (x_bounds.1, order.price as f64)];
+            (line_data, order.is_own, order.order_type)
+        })
+        .collect();
+
+    // Store references to all the data we'll use in the chart
+    let order_datasets: Vec<Dataset> = all_order_data
+        .iter()
+        .map(|(line_data, is_own, order_type)| {
+            let (color, modifier) = match (*order_type, *is_own) {
+                (OrderType::Bid, true) => (theme::GREEN, Modifier::BOLD),
+                (OrderType::Bid, false) => (theme::GREEN, Modifier::empty()),
+                (OrderType::Ask, true) => (theme::RED, Modifier::BOLD),
+                (OrderType::Ask, false) => (theme::RED, Modifier::empty()),
+            };
+            Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(color).add_modifier(modifier))
+                .data(line_data)
+        })
+        .collect();
+
+    datasets.extend(order_datasets);
 
     let chart = Chart::new(datasets)
         .block(
@@ -362,10 +425,11 @@ fn render_game_info(
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
         ])
         .split(area);
 
@@ -390,13 +454,17 @@ fn render_game_info(
 
         render_info_box(frame, chunks[0], "PRICE", &price_text, price_color);
 
+        // Cursor
+        let cursor_text = format!("${}", game.cursor_price);
+        render_info_box(frame, chunks[1], "CURSOR", &cursor_text, theme::AMBER);
+
         // Balance
         let balance_text = format!("${}", game.balance);
-        render_info_box(frame, chunks[1], "BALANCE", &balance_text, theme::YELLOW_DATA);
+        render_info_box(frame, chunks[2], "BALANCE", &balance_text, theme::YELLOW_DATA);
 
         // Shares
         let shares_text = format!("{}", game.shares);
-        render_info_box(frame, chunks[2], "SHARES", &shares_text, Color::White);
+        render_info_box(frame, chunks[3], "SHARES", &shares_text, Color::White);
 
         // P/L calculation: current value - starting balance
         let current_value = game.balance as i64 + (game.shares as i64 * game.current_price as i64);
@@ -405,7 +473,7 @@ fn render_game_info(
         let pnl_color = if pnl >= 0 { theme::GREEN } else { theme::RED };
         let pnl_sign = if pnl >= 0 { "+" } else { "" };
         let pnl_text = format!("{}${}", pnl_sign, pnl);
-        render_info_box(frame, chunks[3], "P/L", &pnl_text, pnl_color);
+        render_info_box(frame, chunks[4], "P/L", &pnl_text, pnl_color);
     } else {
         let waiting = Paragraph::new("Waiting for game to start...")
             .style(Style::default().fg(theme::TEXT_DIM))
@@ -438,66 +506,6 @@ fn render_info_box(
     frame.render_widget(value_widget, inner);
 }
 
-fn render_event_log(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-) {
-    let events: Vec<ListItem> = if let Some(ref game) = app.game {
-        game.event_log
-            .iter()
-            .rev()
-            .take(20)
-            .rev()
-            .map(|event| {
-                let (prefix, style) = if event.contains("filled") {
-                    ("✓", Style::default().fg(theme::GREEN))
-                } else if event.contains("placed") {
-                    ("→", Style::default().fg(theme::AMBER))
-                } else if event.contains("started") || event.contains("ended") {
-                    ("●", Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
-                } else {
-                    ("·", Style::default().fg(theme::TEXT_SECONDARY))
-                };
-                ListItem::new(format!(" {} {}", prefix, event)).style(style)
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-
-    let list = List::new(events).block(
-        Block::default()
-            .title("[ EVENT LOG ]")
-            .title_style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
-    );
-
-    frame.render_widget(list, area);
-}
-
-fn render_game_buttons(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .margin(0)
-        .split(area);
-
-    let buy_enabled = app.can_buy();
-    let buy_selected = app.game_button == GameButtonFocus::Buy;
-    render_button(frame, chunks[0], "<B> BUY", buy_selected, buy_enabled);
-
-    let sell_enabled = app.can_sell();
-    let sell_selected = app.game_button == GameButtonFocus::Sell;
-    render_button(frame, chunks[1], "<S> SELL", sell_selected, sell_enabled);
-}
-
 fn render_game_footer(
     frame: &mut Frame,
     area: Rect,
@@ -506,7 +514,7 @@ fn render_game_footer(
     let text = if let Some(ref game) = app.game {
         match game.phase {
             GamePhase::Ended => "Q=Return to matchmaking",
-            GamePhase::Running => "B=Buy | S=Sell | TAB=Switch | Q=Quit",
+            GamePhase::Running => "↑/↓=Move cursor | B=Bid | S=Ask | Q=Quit",
             GamePhase::Countdown(_) => "Get ready!",
         }
     } else if app.countdown.is_some() {

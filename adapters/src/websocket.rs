@@ -25,6 +25,8 @@ pub enum IncomingMessage {
     LeaveQueue,
     PlaceBid { game_id: GameId, value: i32 },
     PlaceAsk { game_id: GameId, value: i32 },
+    CancelBid { game_id: GameId, price: i32 },
+    CancelAsk { game_id: GameId, price: i32 },
 }
 
 pub struct AppState {
@@ -176,6 +178,30 @@ async fn handle_messages(
                                 game_id,
                                 player_id,
                                 value,
+                            },
+                        )
+                        .await;
+                    }
+                    IncomingMessage::CancelBid { game_id, price } => {
+                        let _ = game_service::execute(
+                            Arc::clone(&state.notifier),
+                            Arc::clone(&state.game_store),
+                            GameUseCase::CancelBid {
+                                game_id,
+                                player_id,
+                                price,
+                            },
+                        )
+                        .await;
+                    }
+                    IncomingMessage::CancelAsk { game_id, price } => {
+                        let _ = game_service::execute(
+                            Arc::clone(&state.notifier),
+                            Arc::clone(&state.game_store),
+                            GameUseCase::CancelAsk {
+                                game_id,
+                                player_id,
+                                price,
                             },
                         )
                         .await;

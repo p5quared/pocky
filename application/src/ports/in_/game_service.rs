@@ -19,6 +19,16 @@ pub enum GameUseCase {
         player_id: PlayerId,
         value: i32,
     },
+    CancelBid {
+        game_id: GameId,
+        player_id: PlayerId,
+        price: i32,
+    },
+    CancelAsk {
+        game_id: GameId,
+        player_id: PlayerId,
+        price: i32,
+    },
     LaunchGame {
         players: Vec<PlayerId>,
         config: GameConfig,
@@ -60,6 +70,32 @@ pub async fn execute<N: GameEventNotifier + 'static>(
                     player_id,
                     ask_value: value,
                 },
+            )
+            .await
+        }
+        GameUseCase::CancelBid {
+            game_id,
+            player_id,
+            price,
+        } => {
+            process_action(
+                notifier,
+                game_store,
+                game_id,
+                GameAction::CancelBid { player_id, price },
+            )
+            .await
+        }
+        GameUseCase::CancelAsk {
+            game_id,
+            player_id,
+            price,
+        } => {
+            process_action(
+                notifier,
+                game_store,
+                game_id,
+                GameAction::CancelAsk { player_id, price },
             )
             .await
         }
@@ -133,6 +169,16 @@ fn process_effects<N: GameEventNotifier + 'static>(
                         game_id,
                         player_id,
                         ask_value,
+                    },
+                    GameEvent::BidCanceled { player_id, price } => GameNotification::BidCanceled {
+                        game_id,
+                        player_id,
+                        price,
+                    },
+                    GameEvent::AskCanceled { player_id, price } => GameNotification::AskCanceled {
+                        game_id,
+                        player_id,
+                        price,
                     },
                     GameEvent::GameEnded { final_balances } => GameNotification::GameEnded {
                         game_id,

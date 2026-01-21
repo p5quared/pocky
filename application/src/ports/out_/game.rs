@@ -52,6 +52,16 @@ pub enum GameNotification {
         player_id: PlayerId,
         ask_value: i32,
     },
+    BidCanceled {
+        game_id: GameId,
+        player_id: PlayerId,
+        price: i32,
+    },
+    AskCanceled {
+        game_id: GameId,
+        player_id: PlayerId,
+        price: i32,
+    },
     GameEnded {
         game_id: GameId,
         final_balances: Vec<(PlayerId, i32)>,

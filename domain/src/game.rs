@@ -16,6 +16,12 @@ pub enum GameError {
 
     #[error("insufficient shares: have {available}, need {required}")]
     InsufficientShares { available: usize, required: usize },
+
+    #[error("player not found: {0:?}")]
+    PlayerNotFound(PlayerId),
+
+    #[error("{order_type} order at price {price} not found")]
+    OrderNotFound { order_type: String, price: i32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -296,6 +302,8 @@ pub enum GameAction {
     Tick,
     Bid { player_id: PlayerId, bid_value: i32 },
     Ask { player_id: PlayerId, ask_value: i32 },
+    CancelBid { player_id: PlayerId, price: i32 },
+    CancelAsk { player_id: PlayerId, price: i32 },
     End,
 }
 
@@ -324,6 +332,14 @@ pub enum GameEvent {
         player_id: PlayerId,
         ask_value: i32,
     },
+    BidCanceled {
+        player_id: PlayerId,
+        price: i32,
+    },
+    AskCanceled {
+        player_id: PlayerId,
+        price: i32,
+    },
     GameEnded {
         final_balances: Vec<(PlayerId, i32)>,
     },
@@ -346,6 +362,8 @@ impl GameState {
             GameAction::Tick => self.handle_price_tick(),
             GameAction::Bid { player_id, bid_value } => self.handle_bid(player_id, bid_value),
             GameAction::Ask { player_id, ask_value } => self.handle_ask(player_id, ask_value),
+            GameAction::CancelBid { player_id, price } => self.handle_cancel_bid(player_id, price),
+            GameAction::CancelAsk { player_id, price } => self.handle_cancel_ask(player_id, price),
             GameAction::End => self.handle_game_end(),
         }
     }
@@ -631,6 +649,66 @@ impl GameState {
             .map(|&pid| GameEffect::Notify {
                 player_id: pid,
                 event: GameEvent::AskPlaced { player_id, ask_value },
+            })
+            .collect())
+    }
+
+    fn handle_cancel_bid(
+        &mut self,
+        player_id: PlayerId,
+        price: i32,
+    ) -> Result<Vec<GameEffect>, GameError> {
+        self.require_phase(GamePhase::Running, "CancelBid")?;
+
+        let state = self.players.get_mut(&player_id).ok_or(GameError::PlayerNotFound(player_id))?;
+
+        let idx = state
+            .open_bids
+            .iter()
+            .position(|&b| b == price)
+            .ok_or(GameError::OrderNotFound {
+                order_type: "bid".to_string(),
+                price,
+            })?;
+
+        state.open_bids.remove(idx);
+
+        Ok(self
+            .players
+            .keys()
+            .map(|&pid| GameEffect::Notify {
+                player_id: pid,
+                event: GameEvent::BidCanceled { player_id, price },
+            })
+            .collect())
+    }
+
+    fn handle_cancel_ask(
+        &mut self,
+        player_id: PlayerId,
+        price: i32,
+    ) -> Result<Vec<GameEffect>, GameError> {
+        self.require_phase(GamePhase::Running, "CancelAsk")?;
+
+        let state = self.players.get_mut(&player_id).ok_or(GameError::PlayerNotFound(player_id))?;
+
+        let idx = state
+            .open_asks
+            .iter()
+            .position(|&a| a == price)
+            .ok_or(GameError::OrderNotFound {
+                order_type: "ask".to_string(),
+                price,
+            })?;
+
+        state.open_asks.remove(idx);
+
+        Ok(self
+            .players
+            .keys()
+            .map(|&pid| GameEffect::Notify {
+                player_id: pid,
+                event: GameEvent::AskCanceled { player_id, price },
             })
             .collect())
     }

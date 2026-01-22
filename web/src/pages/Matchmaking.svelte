@@ -64,7 +64,7 @@
   <div class="queue-section">
     {#if isQueued}
       <div class="queue-info">
-        <p>Waiting for opponent...</p>
+        <p class="waiting-text">Waiting for opponent...</p>
         <p class="timer">{formatTime(elapsedTime)}</p>
         <p class="player-id">Your ID: {$matchmakingStore.playerId?.slice(0, 8)}...</p>
       </div>
@@ -92,17 +92,23 @@
     min-height: 100vh;
     padding: 20px;
     text-align: center;
+    background: #0a0a0a;
   }
 
   h1 {
     font-size: 48px;
     margin-bottom: 8px;
-    color: #e94560;
+    color: #ff9500;
+    letter-spacing: 4px;
+    font-weight: 700;
   }
 
   .subtitle {
-    color: #888;
+    color: #666;
     margin-bottom: 32px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 12px;
   }
 
   .status-indicator {
@@ -110,11 +116,13 @@
     align-items: center;
     gap: 8px;
     padding: 8px 16px;
-    background: #16213e;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
     border-radius: 20px;
     margin-bottom: 24px;
     font-size: 14px;
     text-transform: capitalize;
+    color: #888;
   }
 
   .dot {
@@ -125,11 +133,12 @@
   }
 
   .status-indicator.connected .dot {
-    background: #4ade80;
+    background: #00ff88;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
   }
 
   .error {
-    color: #e94560;
+    color: #ff4466;
     margin-bottom: 16px;
   }
 
@@ -138,6 +147,11 @@
     flex-direction: column;
     align-items: center;
     gap: 16px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 32px;
+    min-width: 280px;
   }
 
   .queue-info {
@@ -147,16 +161,22 @@
     gap: 8px;
   }
 
+  .waiting-text {
+    color: #888;
+  }
+
   .timer {
     font-size: 32px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    color: #ff9500;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
   }
 
   .player-id {
     font-size: 12px;
-    color: #666;
-    font-family: monospace;
+    color: #444;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
   }
 
   .btn {
@@ -167,6 +187,7 @@
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
   }
 
   .btn:disabled {
@@ -175,22 +196,23 @@
   }
 
   .btn-primary {
-    background: #e94560;
-    color: white;
+    background: #ff9500;
+    color: #0a0a0a;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: #d63d56;
+    background: #e68600;
   }
 
   .btn-secondary {
-    background: #16213e;
+    background: transparent;
     color: #888;
-    border: 1px solid #0f3460;
+    border: 1px solid rgba(255,255,255,0.1);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background: #1a2a4e;
+    background: rgba(255,255,255,0.05);
     color: #fff;
+    border-color: rgba(255,255,255,0.2);
   }
 </style>

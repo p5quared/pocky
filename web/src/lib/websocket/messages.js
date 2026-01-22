@@ -15,3 +15,11 @@ export function placeBid(gameId, value) {
 export function placeAsk(gameId, value) {
   return { type: 'place_ask', game_id: gameId, value };
 }
+
+export function cancelBid(gameId, price) {
+  return { type: 'cancel_bid', game_id: gameId, price };
+}
+
+export function cancelAsk(gameId, price) {
+  return { type: 'cancel_ask', game_id: gameId, price };
+}

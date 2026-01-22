@@ -115,6 +115,15 @@ function createGameStore() {
       });
     },
 
+    cancelOrder: (type, playerId, price) => {
+      update(s => ({
+        ...s,
+        openOrders: s.openOrders.filter(
+          o => !(o.type === type && o.playerId === playerId && o.value === price)
+        )
+      }));
+    },
+
     endGame: (finalBalances) => {
       update(s => ({
         ...s,

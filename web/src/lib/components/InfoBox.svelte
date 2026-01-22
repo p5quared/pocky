@@ -11,32 +11,32 @@
 
 <style>
   .info-box {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
     border-radius: 8px;
-    padding: 12px 16px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    min-width: 100px;
+    gap: 2px;
+    min-width: 80px;
   }
 
   .info-box.highlight {
-    border-color: #e94560;
-    background: #1a1a3e;
+    border-color: #ff9500;
   }
 
   .label {
-    font-size: 12px;
-    color: #888;
+    font-size: 10px;
+    color: #888888;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
   .value {
-    font-size: 24px;
+    font-size: 18px;
     font-weight: 600;
-    color: #fff;
+    color: #ff9500;
     font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
   }
 </style>

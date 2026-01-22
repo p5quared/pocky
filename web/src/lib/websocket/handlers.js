@@ -70,6 +70,14 @@ function handleGameNotification(msg) {
       gameStore.fillAsk(msg.player_id, msg.ask_value);
       break;
 
+    case 'bid_canceled':
+      gameStore.cancelOrder('bid', msg.player_id, msg.price);
+      break;
+
+    case 'ask_canceled':
+      gameStore.cancelOrder('ask', msg.player_id, msg.price);
+      break;
+
     case 'game_ended':
       gameStore.endGame(msg.final_balances);
       break;

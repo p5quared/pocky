@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use futures::stream::SplitStream;
 use futures::StreamExt;
+use futures::stream::SplitStream;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
-use application::ports::in_::game_service::GameUseCase;
 use application::ports::in_::game_service;
+use application::ports::in_::game_service::GameUseCase;
 use domain::{GameId, MatchmakingOutcome, PlayerId};
 
 use crate::web::state::AppState;
@@ -117,12 +117,7 @@ async fn handle_messages(
                         }
                     }
                     IncomingMessage::LeaveQueue => {
-                        state
-                            .matchmaking_service
-                            .lock()
-                            .await
-                            .remove_player(player_id)
-                            .await;
+                        state.matchmaking_service.lock().await.remove_player(player_id).await;
                     }
                 },
                 Err(e) => {

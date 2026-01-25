@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket};
-use futures::stream::SplitSink;
 use futures::SinkExt;
+use futures::stream::SplitSink;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::debug;
 
@@ -22,29 +22,30 @@ impl WebSocketNotifier {
         }
     }
 
-    pub async fn register_player(&self, player_id: PlayerId, sender: WebSocketSender) {
-        self.connections
-            .write()
-            .await
-            .push((player_id, TokioMutex::new(sender)));
+    pub async fn register_player(
+        &self,
+        player_id: PlayerId,
+        sender: WebSocketSender,
+    ) {
+        self.connections.write().await.push((player_id, TokioMutex::new(sender)));
     }
 
-    pub async fn unregister_player(&self, player_id: PlayerId) {
-        self.connections
-            .write()
-            .await
-            .retain(|(pid, _)| *pid != player_id);
+    pub async fn unregister_player(
+        &self,
+        player_id: PlayerId,
+    ) {
+        self.connections.write().await.retain(|(pid, _)| *pid != player_id);
     }
 
-    async fn send_to_player(&self, player_id: PlayerId, message: &str) {
+    async fn send_to_player(
+        &self,
+        player_id: PlayerId,
+        message: &str,
+    ) {
         debug!(player_id = ?player_id, message = %message, "-> Sending");
         let connections = self.connections.read().await;
         if let Some((_, sender)) = connections.iter().find(|(pid, _)| *pid == player_id) {
-            let _ = sender
-                .lock()
-                .await
-                .send(Message::Text(message.into()))
-                .await;
+            let _ = sender.lock().await.send(Message::Text(message.into())).await;
         }
     }
 }
@@ -57,7 +58,11 @@ impl Default for WebSocketNotifier {
 
 #[async_trait]
 impl GameEventNotifier for WebSocketNotifier {
-    async fn notify_player(&self, player_id: PlayerId, notification: GameNotification) {
+    async fn notify_player(
+        &self,
+        player_id: PlayerId,
+        notification: GameNotification,
+    ) {
         let message = serde_json::to_string(&notification).unwrap_or_default();
         self.send_to_player(player_id, &message).await;
     }
@@ -65,16 +70,15 @@ impl GameEventNotifier for WebSocketNotifier {
 
 #[async_trait]
 impl QueueNotifier for WebSocketNotifier {
-    async fn broadcast(&self, event: &MatchmakingOutcome) {
+    async fn broadcast(
+        &self,
+        event: &MatchmakingOutcome,
+    ) {
         let message = serde_json::to_string(event).unwrap_or_default();
         let connections = self.connections.read().await;
         for (player_id, sender) in connections.iter() {
             debug!(player_id = ?player_id, message = %message, "-> Broadcasting");
-            let _ = sender
-                .lock()
-                .await
-                .send(Message::Text(message.clone().into()))
-                .await;
+            let _ = sender.lock().await.send(Message::Text(message.clone().into())).await;
         }
     }
 }

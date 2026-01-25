@@ -1,5 +1,5 @@
 mod handler;
 mod notifier;
 
-pub use handler::{handle_connection, IncomingMessage};
+pub use handler::{IncomingMessage, handle_connection};
 pub use notifier::WebSocketNotifier;

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 
-use application::ports::in_::game_service::GameStore;
 use application::ports::in_::MatchmakingService;
+use application::ports::in_::game_service::GameStore;
 use application::ports::out_::QueueNotifier;
 
 use super::websocket::WebSocketNotifier;

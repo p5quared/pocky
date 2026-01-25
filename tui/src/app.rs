@@ -1,5 +1,7 @@
-use domain::{GameId, PlayerId};
+use std::collections::HashMap;
 use std::time::Instant;
+
+use domain::{GameId, PlayerId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
@@ -60,6 +62,7 @@ pub struct GameState {
     pub balance: i32,
     pub shares: i32,
     pub players: Vec<PlayerId>,
+    pub all_prices: HashMap<PlayerId, i32>,
     pub price_history: Vec<(f64, f64)>,
     pub time_index: usize,
     pub cursor_price: i32,
@@ -73,6 +76,7 @@ impl GameState {
         starting_balance: i32,
         players: Vec<PlayerId>,
     ) -> Self {
+        let all_prices: HashMap<PlayerId, i32> = players.iter().map(|&p| (p, starting_price)).collect();
         Self {
             phase: GamePhase::Running,
             game_id,
@@ -82,6 +86,7 @@ impl GameState {
             balance: starting_balance,
             shares: 0,
             players,
+            all_prices,
             price_history: vec![(0.0, starting_price as f64)],
             time_index: 0,
             cursor_price: starting_price,
@@ -123,13 +128,18 @@ impl GameState {
         }
     }
 
-    pub fn add_price(
+    pub fn set_player_price(
         &mut self,
+        player_id: PlayerId,
         price: i32,
+        my_player_id: Option<PlayerId>,
     ) {
-        self.time_index += 1;
-        self.current_price = price;
-        self.price_history.push((self.time_index as f64, price as f64));
+        self.all_prices.insert(player_id, price);
+        if Some(player_id) == my_player_id {
+            self.time_index += 1;
+            self.current_price = price;
+            self.price_history.push((self.time_index as f64, price as f64));
+        }
     }
 
     pub fn price_bounds(&self) -> (f64, f64) {

@@ -285,14 +285,36 @@ impl MarketForce {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PlayerTicker {
+    pub ticker: Ticker,
+    pub current_price: i32,
+}
+
+impl PlayerTicker {
+    pub fn new(
+        base_volatility: i32,
+        starting_price: i32,
+    ) -> Self {
+        Self {
+            ticker: Ticker::new(base_volatility),
+            current_price: starting_price,
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.ticker.tick();
+        self.current_price = (self.current_price + self.ticker.next_delta()).max(0);
+    }
+}
+
 #[derive(Clone)]
 pub struct GameState {
     phase: GamePhase,
     config: GameConfig,
-    current_price: i32,
     players: HashMap<PlayerId, PlayerState>,
+    player_tickers: HashMap<PlayerId, PlayerTicker>,
     ticks_remaining: u32,
-    ticker: Ticker,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -315,7 +337,10 @@ pub enum GameEvent {
         starting_balance: i32,
         players: Vec<PlayerId>,
     },
-    PriceChanged(i32),
+    PriceChanged {
+        player_id: PlayerId,
+        price: i32,
+    },
     BidPlaced {
         player_id: PlayerId,
         bid_value: i32,
@@ -391,18 +416,21 @@ impl GameState {
     ) -> Self {
         let starting_balance = config.starting_balance;
         let tick_count = (config.game_duration.as_millis() / config.tick_interval.as_millis()) as u32;
+        let player_ids: Vec<PlayerId> = players.clone();
         let players = players
             .into_iter()
             .map(|pid| (pid, PlayerState::new(starting_balance)))
             .collect();
-        let ticker = Ticker::new(config.max_price_delta);
+        let player_tickers = player_ids
+            .into_iter()
+            .map(|pid| (pid, PlayerTicker::new(config.max_price_delta, 0)))
+            .collect();
         Self {
             phase: GamePhase::Pending,
             config,
             players,
-            current_price: 0,
+            player_tickers,
             ticks_remaining: tick_count,
-            ticker,
         }
     }
 
@@ -451,14 +479,19 @@ impl GameState {
         self.require_phase(GamePhase::Pending, "Start")?;
 
         self.phase = GamePhase::Running;
-        self.current_price = self.config.starting_price;
+
+        // Initialize all player tickers to starting price
+        let starting_price = self.config.starting_price;
+        for player_ticker in self.player_tickers.values_mut() {
+            player_ticker.current_price = starting_price;
+        }
 
         let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
 
         let started_notifications = player_ids.iter().map(|&player_id| GameEffect::Notify {
             player_id,
             event: GameEvent::GameStarted {
-                starting_price: self.current_price,
+                starting_price,
                 starting_balance: self.config.starting_balance,
                 players: player_ids.clone(),
             },
@@ -484,18 +517,26 @@ impl GameState {
 
         self.ticks_remaining -= 1;
 
-        self.ticker.tick();
-        self.current_price = (self.current_price + self.ticker.next_delta()).max(0);
+        for player_ticker in self.player_tickers.values_mut() {
+            player_ticker.tick();
+        }
 
         let resolved_bids = self.resolve_bids();
         let resolved_asks = self.resolve_asks();
 
-        let price_notifications = self.players.keys().map(|&player_id| GameEffect::Notify {
-            player_id,
-            event: GameEvent::PriceChanged(self.current_price),
+        let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
+        let prices: Vec<(PlayerId, i32)> = self.player_tickers.iter().map(|(&pid, pt)| (pid, pt.current_price)).collect();
+
+        let price_notifications = player_ids.iter().flat_map(|&notify_player| {
+            prices.iter().map(move |&(ticker_owner, price)| GameEffect::Notify {
+                player_id: notify_player,
+                event: GameEvent::PriceChanged {
+                    player_id: ticker_owner,
+                    price,
+                },
+            })
         });
 
-        let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
         let bid_notifications = resolved_bids.into_iter().flat_map(|(order_owner, bid_value)| {
             player_ids.iter().map(move |&notify_player| GameEffect::Notify {
                 player_id: notify_player,
@@ -543,7 +584,10 @@ impl GameState {
         let final_balances: Vec<(PlayerId, i32)> = self
             .players
             .iter()
-            .map(|(&player_id, state)| (player_id, state.net_worth(self.current_price)))
+            .map(|(&player_id, state)| {
+                let player_price = self.player_tickers.get(&player_id).map(|pt| pt.current_price).unwrap_or(0);
+                (player_id, state.net_worth(player_price))
+            })
             .collect();
 
         Ok(self
@@ -559,11 +603,14 @@ impl GameState {
     }
 
     fn resolve_bids(&mut self) -> Vec<(PlayerId, i32)> {
-        let current_price = self.current_price;
-        let can_fill_bid = |bid: i32| bid >= current_price;
+        let player_prices: HashMap<PlayerId, i32> =
+            self.player_tickers.iter().map(|(&pid, pt)| (pid, pt.current_price)).collect();
 
         let mut resolved = Vec::new();
         for (player_id, state) in &mut self.players {
+            let current_price = player_prices.get(player_id).copied().unwrap_or(0);
+            let can_fill_bid = |bid: i32| bid >= current_price;
+
             let filled_indices: Vec<usize> = state
                 .open_bids
                 .iter()
@@ -580,8 +627,11 @@ impl GameState {
             }
         }
 
-        for (_, _) in &resolved {
-            self.ticker.on_bid_filled(self.current_price as f32);
+        for &(player_id, _) in &resolved {
+            let fill_price = player_prices.get(&player_id).copied().unwrap_or(0);
+            for player_ticker in self.player_tickers.values_mut() {
+                player_ticker.ticker.on_bid_filled(fill_price as f32);
+            }
         }
 
         resolved
@@ -608,7 +658,9 @@ impl GameState {
             state.open_bids.push(bid_value);
         }
 
-        self.ticker.on_bid_placed(bid_value as f32);
+        for player_ticker in self.player_tickers.values_mut() {
+            player_ticker.ticker.on_bid_placed(bid_value as f32);
+        }
 
         Ok(self
             .players
@@ -641,7 +693,9 @@ impl GameState {
             state.open_asks.push(ask_value);
         }
 
-        self.ticker.on_ask_placed(ask_value as f32);
+        for player_ticker in self.player_tickers.values_mut() {
+            player_ticker.ticker.on_ask_placed(ask_value as f32);
+        }
 
         Ok(self
             .players
@@ -714,11 +768,15 @@ impl GameState {
     }
 
     fn resolve_asks(&mut self) -> Vec<(PlayerId, i32)> {
-        let current_price = self.current_price;
-        let can_resolve_ask = |ask: i32| ask <= current_price;
+        let player_prices: HashMap<PlayerId, i32> =
+            self.player_tickers.iter().map(|(&pid, pt)| (pid, pt.current_price)).collect();
+
         let mut resolved = Vec::new();
 
         for (player_id, state) in &mut self.players {
+            let current_price = player_prices.get(player_id).copied().unwrap_or(0);
+            let can_resolve_ask = |ask: i32| ask <= current_price;
+
             let filled_indices: Vec<usize> = state
                 .open_asks
                 .iter()
@@ -737,8 +795,11 @@ impl GameState {
             }
         }
 
-        for (_, _) in &resolved {
-            self.ticker.on_ask_filled(self.current_price as f32);
+        for &(player_id, _) in &resolved {
+            let fill_price = player_prices.get(&player_id).copied().unwrap_or(0);
+            for player_ticker in self.player_tickers.values_mut() {
+                player_ticker.ticker.on_ask_filled(fill_price as f32);
+            }
         }
 
         resolved
@@ -832,7 +893,9 @@ mod tests {
             mut self,
             price: i32,
         ) -> Self {
-            self.game.current_price = price;
+            for player_ticker in self.game.player_tickers.values_mut() {
+                player_ticker.current_price = price;
+            }
             self.game.phase = GamePhase::Running;
             self
         }
@@ -886,7 +949,21 @@ mod tests {
             &mut self,
             price: i32,
         ) -> &mut Self {
-            self.game.current_price = price;
+            for player_ticker in self.game.player_tickers.values_mut() {
+                player_ticker.current_price = price;
+            }
+            self
+        }
+
+        fn set_player_price(
+            &mut self,
+            player_idx: usize,
+            price: i32,
+        ) -> &mut Self {
+            let player_id = self.players[player_idx];
+            if let Some(player_ticker) = self.game.player_tickers.get_mut(&player_id) {
+                player_ticker.current_price = price;
+            }
             self
         }
 
@@ -1008,10 +1085,33 @@ mod tests {
             &self,
             expected: i32,
         ) -> &Self {
+            for (&player_id, player_ticker) in &self.game.player_tickers {
+                assert_eq!(
+                    player_ticker.current_price, expected,
+                    "Player {:?}: expected price {}, got {}",
+                    player_id, expected, player_ticker.current_price
+                );
+            }
+            self
+        }
+
+        #[track_caller]
+        fn check_player_price(
+            &self,
+            player_idx: usize,
+            expected: i32,
+        ) -> &Self {
+            let player_id = self.players[player_idx];
+            let actual = self
+                .game
+                .player_tickers
+                .get(&player_id)
+                .map(|pt| pt.current_price)
+                .unwrap_or(0);
             assert_eq!(
-                self.game.current_price, expected,
-                "Expected price {}, got {}",
-                expected, self.game.current_price
+                actual, expected,
+                "Player {}: expected price {}, got {}",
+                player_idx, expected, actual
             );
             self
         }
@@ -1022,14 +1122,17 @@ mod tests {
             base: i32,
             max_delta: i32,
         ) -> &Self {
-            let delta = (self.game.current_price - base).abs();
-            assert!(
-                delta <= max_delta,
-                "Price {} is outside range [{}, {}]",
-                self.game.current_price,
-                base - max_delta,
-                base + max_delta
-            );
+            for (&player_id, player_ticker) in &self.game.player_tickers {
+                let delta = (player_ticker.current_price - base).abs();
+                assert!(
+                    delta <= max_delta,
+                    "Player {:?}: Price {} is outside range [{}, {}]",
+                    player_id,
+                    player_ticker.current_price,
+                    base - max_delta,
+                    base + max_delta
+                );
+            }
             self
         }
 
@@ -1144,7 +1247,7 @@ mod tests {
         t.tick();
         t.check_ok()
             .check_price_in_range(50, 10)
-            .check_all_notified(|e| matches!(e, GameEvent::PriceChanged(_)));
+            .check_all_notified(|e| matches!(e, GameEvent::PriceChanged { .. }));
     }
 
     #[test]
@@ -1239,11 +1342,15 @@ mod tests {
         // Run ticks until exhausted (10 ticks in test config)
         while t.game.ticks_remaining > 0 {
             t.tick();
-            assert!(
-                t.game.current_price >= 0,
-                "Price should never be negative, got {}",
-                t.game.current_price
-            );
+            // Check all players' prices stay non-negative
+            for (&player_id, player_ticker) in &t.game.player_tickers {
+                assert!(
+                    player_ticker.current_price >= 0,
+                    "Player {:?}: Price should never be negative, got {}",
+                    player_id,
+                    player_ticker.current_price
+                );
+            }
         }
     }
 

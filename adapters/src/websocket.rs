@@ -122,7 +122,10 @@ impl GameEventNotifier for WebSocketNotifier {
 
 #[async_trait]
 impl QueueNotifier for WebSocketNotifier {
-    async fn broadcast(&self, event: &MatchmakingOutcome) {
+    async fn broadcast(
+        &self,
+        event: &MatchmakingOutcome,
+    ) {
         let message = serde_json::to_string(event).unwrap_or_default();
         let connections = self.connections.read().await;
         for (player_id, sender) in connections.iter() {

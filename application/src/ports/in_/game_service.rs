@@ -77,28 +77,12 @@ pub async fn execute<N: GameEventNotifier + 'static>(
             game_id,
             player_id,
             price,
-        } => {
-            process_action(
-                notifier,
-                game_store,
-                game_id,
-                GameAction::CancelBid { player_id, price },
-            )
-            .await
-        }
+        } => process_action(notifier, game_store, game_id, GameAction::CancelBid { player_id, price }).await,
         GameUseCase::CancelAsk {
             game_id,
             player_id,
             price,
-        } => {
-            process_action(
-                notifier,
-                game_store,
-                game_id,
-                GameAction::CancelAsk { player_id, price },
-            )
-            .await
-        }
+        } => process_action(notifier, game_store, game_id, GameAction::CancelAsk { player_id, price }).await,
         GameUseCase::LaunchGame { players, config } => {
             let game_id = GameId::new();
             let (game_state, effects) = GameState::launch(players, config);
@@ -149,7 +133,11 @@ fn process_effects<N: GameEventNotifier + 'static>(
                         starting_balance,
                         players,
                     },
-                    GameEvent::PriceChanged(price) => GameNotification::PriceChanged { game_id, price },
+                    GameEvent::PriceChanged { player_id, price } => GameNotification::PriceChanged {
+                        game_id,
+                        player_id,
+                        price,
+                    },
                     GameEvent::BidPlaced { player_id, bid_value } => GameNotification::BidPlaced {
                         game_id,
                         player_id,
@@ -180,10 +168,7 @@ fn process_effects<N: GameEventNotifier + 'static>(
                         player_id,
                         price,
                     },
-                    GameEvent::GameEnded { final_balances } => GameNotification::GameEnded {
-                        game_id,
-                        final_balances,
-                    },
+                    GameEvent::GameEnded { final_balances } => GameNotification::GameEnded { game_id, final_balances },
                 };
                 let notifier = Arc::clone(&notifier);
                 tokio::spawn(async move {

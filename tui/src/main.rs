@@ -264,9 +264,9 @@ fn handle_game_notification(
             app.countdown = None;
             app.game = Some(GameState::new(game_id, starting_price, starting_balance, players));
         }
-        GameNotification::PriceChanged { price, .. } => {
+        GameNotification::PriceChanged { player_id, price, .. } => {
             if let Some(ref mut game) = app.game {
-                game.add_price(price);
+                game.set_player_price(player_id, price, app.player_id);
             }
         }
         GameNotification::BidPlaced {

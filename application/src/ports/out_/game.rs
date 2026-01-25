@@ -30,6 +30,7 @@ pub enum GameNotification {
     },
     PriceChanged {
         game_id: GameId,
+        player_id: PlayerId,
         price: i32,
     },
     BidPlaced {

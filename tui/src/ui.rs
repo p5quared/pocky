@@ -244,14 +244,26 @@ fn draw_game(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Title/Status
-            Constraint::Min(10),   // Chart (full width)
+            Constraint::Min(10),   // Chart + sidebar
             Constraint::Length(3), // Info panel
             Constraint::Length(2), // Footer/Help
         ])
         .split(area);
 
     render_game_title(frame, chunks[0], app);
-    render_price_chart(frame, chunks[1], app);
+
+    // Split chart area horizontally for chart + players sidebar
+    let chart_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(40),    // Chart
+            Constraint::Length(22), // Players sidebar
+        ])
+        .split(chunks[1]);
+
+    render_price_chart(frame, chart_chunks[0], app);
+    render_players_sidebar(frame, chart_chunks[1], app);
+
     render_game_info(frame, chunks[2], app);
     render_game_footer(frame, chunks[3], app);
 }
@@ -415,6 +427,76 @@ fn render_price_chart(
         );
 
     frame.render_widget(chart, area);
+}
+
+fn render_players_sidebar(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+) {
+    let block = Block::default()
+        .title("[ PLAYERS ]")
+        .title_style(Style::default().fg(theme::ORANGE).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(theme::BORDER_ACTIVE));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(ref game) = app.game {
+        let starting_price = game.starting_price;
+
+        // Sort players for consistent display
+        let mut player_prices: Vec<_> = game.all_prices.iter().collect();
+        player_prices.sort_by_key(|(pid, _)| pid.0);
+
+        let items: Vec<ListItem> = player_prices
+            .iter()
+            .enumerate()
+            .map(|(i, (player_id, price))| {
+                let player_id = **player_id;
+                let price = **price;
+                let is_self = app.player_id == Some(player_id);
+                let prefix = if is_self { "▶" } else { " " };
+
+                // Price direction from start
+                let (arrow, color) = if price > starting_price {
+                    ("▲", theme::GREEN)
+                } else if price < starting_price {
+                    ("▼", theme::RED)
+                } else {
+                    ("─", Color::White)
+                };
+
+                let uuid_str = player_id.0.to_string();
+                let short_id = &uuid_str[..6];
+
+                let text = format!("{} P{} {}...", prefix, i + 1, short_id);
+                let price_text = format!("${} {}", price, arrow);
+
+                let style = if is_self {
+                    Style::default().fg(theme::ORANGE_BRIGHT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+
+                // Create a two-line item for each player
+                ListItem::new(vec![
+                    ratatui::text::Line::from(text).style(style),
+                    ratatui::text::Line::from(format!("   {}", price_text)).style(Style::default().fg(color)),
+                ])
+            })
+            .collect();
+
+        let list = List::new(items);
+        frame.render_widget(list, inner);
+    } else {
+        let waiting = Paragraph::new("Waiting...")
+            .style(Style::default().fg(theme::TEXT_DIM))
+            .alignment(Alignment::Center);
+        frame.render_widget(waiting, inner);
+    }
 }
 
 fn render_game_info(

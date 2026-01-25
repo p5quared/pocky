@@ -2,13 +2,10 @@
   import { onMount, onDestroy } from 'svelte';
 
   export let priceHistory = [];
-  export let hoverPrice = null;
 
   let containerEl;
   let width = 800;
   let height = 400;
-  let mouseX = null;
-  let mouseY = null;
   let resizeObserver;
 
   const padding = { top: 20, right: 60, bottom: 40, left: 20 };
@@ -44,11 +41,6 @@
     return padding.top + (1 - (value - paddedMin) / range) * chartHeight;
   }
 
-  function priceFromY(y) {
-    const range = paddedMax - paddedMin || 1;
-    return paddedMin + (1 - (y - padding.top) / chartHeight) * range;
-  }
-
   $: linePath = visibleHistory.map((p, i) =>
     `${i === 0 ? 'M' : 'L'} ${scaleX(i)} ${scaleY(p.value)}`
   ).join(' ');
@@ -64,34 +56,14 @@
   $: gridLines = (() => {
     const lines = [];
     const numLines = 5;
+    const range = paddedMax - paddedMin || 1;
     for (let i = 0; i <= numLines; i++) {
       const y = padding.top + (i / numLines) * chartHeight;
-      const price = priceFromY(y);
+      const price = paddedMin + (1 - (y - padding.top) / chartHeight) * range;
       lines.push({ y, price: Math.round(price) });
     }
     return lines;
   })();
-
-  function handleMouseMove(event) {
-    if (!containerEl) return;
-    const rect = containerEl.getBoundingClientRect();
-    mouseX = event.clientX - rect.left;
-    mouseY = event.clientY - rect.top;
-
-    if (mouseX >= padding.left && mouseX <= width - padding.right &&
-        mouseY >= padding.top && mouseY <= height - padding.bottom) {
-      const rawPrice = priceFromY(mouseY);
-      hoverPrice = Math.round(rawPrice / 10) * 10;
-    } else {
-      hoverPrice = null;
-    }
-  }
-
-  function handleMouseLeave() {
-    mouseX = null;
-    mouseY = null;
-    hoverPrice = null;
-  }
 
   onMount(() => {
     if (containerEl) {
@@ -115,8 +87,6 @@
 <div
   class="chart-wrapper"
   bind:this={containerEl}
-  on:mousemove={handleMouseMove}
-  on:mouseleave={handleMouseLeave}
   role="img"
   aria-label="Price chart"
 >
@@ -181,38 +151,6 @@
       {/if}
     {/if}
 
-    <!-- Hover indicator -->
-    {#if hoverPrice !== null && mouseX !== null && mouseY !== null}
-      <!-- Horizontal line -->
-      <line
-        x1={padding.left}
-        y1={scaleY(hoverPrice)}
-        x2={width - padding.right}
-        y2={scaleY(hoverPrice)}
-        stroke="#666"
-        stroke-dasharray="2,2"
-      />
-      <!-- Price label -->
-      <rect
-        x={width - padding.right + 2}
-        y={scaleY(hoverPrice) - 10}
-        width="50"
-        height="20"
-        fill="#ff9500"
-        rx="3"
-      />
-      <text
-        x={width - padding.right + 27}
-        y={scaleY(hoverPrice) + 4}
-        fill="#0a0a0a"
-        font-size="12"
-        font-weight="600"
-        font-family="SF Mono, Monaco, monospace"
-        text-anchor="middle"
-      >
-        ${hoverPrice}
-      </text>
-    {/if}
   </svg>
 
   <div class="time-labels">

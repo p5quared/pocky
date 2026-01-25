@@ -6,8 +6,6 @@
   import InfoBox from '../lib/components/InfoBox.svelte';
   import PriceChart from '../lib/components/PriceChart.svelte';
 
-  let hoverPrice = null;
-
   $: myId = $matchmakingStore.playerId;
   $: isEnded = $gameStore.phase === 'ended';
   $: isCountdown = $gameStore.phase === 'countdown';
@@ -53,15 +51,17 @@
 
   function handleBid() {
     const gameId = gameStore.getGameId();
-    if (gameId && hoverPrice !== null && hoverPrice > 0) {
-      send(placeBid(gameId, hoverPrice));
+    const price = $gameStore.currentPrice;
+    if (gameId && price > 0) {
+      send(placeBid(gameId, price));
     }
   }
 
   function handleAsk() {
     const gameId = gameStore.getGameId();
-    if (gameId && hoverPrice !== null && hoverPrice > 0) {
-      send(placeAsk(gameId, hoverPrice));
+    const price = $gameStore.currentPrice;
+    if (gameId && price > 0) {
+      send(placeAsk(gameId, price));
     }
   }
 
@@ -126,10 +126,7 @@
   <div class="main-content">
     <div class="chart-panel">
       <div class="panel-header">PRICE HISTORY</div>
-      <PriceChart
-        priceHistory={$gameStore.priceHistory}
-        bind:hoverPrice
-      />
+      <PriceChart priceHistory={$gameStore.priceHistory} />
     </div>
 
     <div class="orderbook-panel">
@@ -173,7 +170,6 @@
 
   <div class="info-row">
     <InfoBox label="Price" value={$gameStore.currentPrice} />
-    <InfoBox label="Cursor" value={hoverPrice ?? '-'} highlight />
     <InfoBox label="Balance" value={`$${$gameStore.balance}`} />
     <InfoBox label="Shares" value={$gameStore.shares} />
     <InfoBox label="P/L" value={formatPL($profitLoss)} />

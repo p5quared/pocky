@@ -27,6 +27,7 @@ pub enum GameNotification {
         starting_price: i32,
         starting_balance: i32,
         players: Vec<PlayerId>,
+        game_duration_secs: u64,
     },
     PriceChanged {
         game_id: GameId,

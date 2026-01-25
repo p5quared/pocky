@@ -127,11 +127,13 @@ fn process_effects<N: GameEventNotifier + 'static>(
                         starting_price,
                         starting_balance,
                         players,
+                        game_duration_secs,
                     } => GameNotification::GameStarted {
                         game_id,
                         starting_price,
                         starting_balance,
                         players,
+                        game_duration_secs,
                     },
                     GameEvent::PriceChanged { player_id, price } => GameNotification::PriceChanged {
                         game_id,

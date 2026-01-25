@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { gameStore, profitLoss, computePlayerStats } from '../lib/stores/game.js';
   import { matchmakingStore } from '../lib/stores/matchmaking.js';
   import { send } from '../lib/websocket/client.js';
@@ -9,8 +10,39 @@
   $: myId = $matchmakingStore.playerId;
   $: isEnded = $gameStore.phase === 'ended';
   $: isCountdown = $gameStore.phase === 'countdown';
+  $: isRunning = $gameStore.phase === 'running';
   $: myResult = $gameStore.finalBalances.find(b => b.playerId === myId);
   $: otherResults = $gameStore.finalBalances.filter(b => b.playerId !== myId);
+
+  // Timer state
+  let timeRemaining = 0;
+  let timerInterval = null;
+
+  function updateTimer() {
+    if ($gameStore.gameStartTime && $gameStore.gameDuration) {
+      const elapsed = (Date.now() - $gameStore.gameStartTime) / 1000;
+      timeRemaining = Math.max(0, Math.ceil($gameStore.gameDuration - elapsed));
+    }
+  }
+
+  // Start/stop timer based on game phase
+  $: if (isRunning && !timerInterval) {
+    updateTimer();
+    timerInterval = setInterval(updateTimer, 100);
+  } else if (!isRunning && timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+
+  onDestroy(() => {
+    if (timerInterval) clearInterval(timerInterval);
+  });
+
+  function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
 
   $: myPlayerData = $gameStore.players[myId];
   $: myStats = myPlayerData ? computePlayerStats(myPlayerData, $gameStore.startingBalance) : null;
@@ -102,6 +134,7 @@
   </div>
 
   <div class="info-row">
+    <InfoBox label="Time" value={formatTime(timeRemaining)} />
     <InfoBox label="Price" value={myPlayerData?.currentPrice ?? 0} />
     <InfoBox label="Balance" value={`$${myStats?.balance ?? 0}`} />
     <InfoBox label="Shares" value={myStats?.shares ?? 0} />

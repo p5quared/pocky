@@ -46,7 +46,8 @@ function handleGameNotification(msg) {
         msg.game_id,
         msg.starting_price,
         msg.starting_balance,
-        msg.players
+        msg.players,
+        msg.game_duration_secs
       );
       break;
 

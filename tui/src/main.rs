@@ -260,6 +260,7 @@ fn handle_game_notification(
             starting_price,
             starting_balance,
             players,
+            ..
         } => {
             app.countdown = None;
             app.game = Some(GameState::new(game_id, starting_price, starting_balance, players));

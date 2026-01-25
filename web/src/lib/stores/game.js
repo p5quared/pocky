@@ -8,6 +8,8 @@ function createGameStore() {
     countdown: 0,
     startingBalance: 0,
     startingPrice: 0,
+    gameDuration: 0, // total game duration in seconds
+    gameStartTime: null, // timestamp when game started
     players: {}, // { [playerId]: { priceHistory, currentPrice, purchasePrices, salePrices } }
     finalBalances: [] // { playerId, balance }
   });
@@ -26,7 +28,7 @@ function createGameStore() {
       }));
     },
 
-    startGame: (gameId, startingPrice, startingBalance, playerIds) => {
+    startGame: (gameId, startingPrice, startingBalance, playerIds, gameDuration) => {
       gameStartTime = Date.now();
       const players = {};
       playerIds.forEach(id => {
@@ -43,6 +45,8 @@ function createGameStore() {
         countdown: 0,
         startingBalance,
         startingPrice,
+        gameDuration,
+        gameStartTime,
         players,
         finalBalances: []
       });
@@ -117,6 +121,8 @@ function createGameStore() {
         countdown: 0,
         startingBalance: 0,
         startingPrice: 0,
+        gameDuration: 0,
+        gameStartTime: null,
         players: {},
         finalBalances: []
       });

@@ -44,7 +44,7 @@ pub struct GameConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
-            tick_interval: Duration::from_millis(500),
+            tick_interval: Duration::from_millis(250),
             game_duration: Duration::from_secs(180),
             max_price_delta: 25,
             starting_price: 100,
@@ -336,6 +336,7 @@ pub enum GameEvent {
         starting_price: i32,
         starting_balance: i32,
         players: Vec<PlayerId>,
+        game_duration_secs: u64,
     },
     PriceChanged {
         player_id: PlayerId,
@@ -494,6 +495,7 @@ impl GameState {
                 starting_price,
                 starting_balance: self.config.starting_balance,
                 players: player_ids.clone(),
+                game_duration_secs: self.config.game_duration.as_secs(),
             },
         });
 

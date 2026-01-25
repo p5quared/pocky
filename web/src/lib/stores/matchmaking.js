@@ -6,6 +6,8 @@ function createMatchmakingStore() {
     playerId: null,
     queuedAt: null,
     matchedPlayers: [],
+    queuedPlayers: [],
+    queueCount: 0,
     error: null
   });
 
@@ -48,12 +50,18 @@ function createMatchmakingStore() {
       update(s => ({ ...s, error: 'Player not found' }));
     },
 
+    setQueuedPlayers: (players, count) => {
+      update(s => ({ ...s, queuedPlayers: players, queueCount: count }));
+    },
+
     reset: () => {
       set({
         status: 'idle',
         playerId: null,
         queuedAt: null,
         matchedPlayers: [],
+        queuedPlayers: [],
+        queueCount: 0,
         error: null
       });
     },

@@ -4,19 +4,33 @@
   import { matchmakingStore } from '../lib/stores/matchmaking.js';
   import { connect, send } from '../lib/websocket/client.js';
   import { joinQueue, leaveQueue } from '../lib/websocket/messages.js';
+  import { fetchQueue } from '../lib/api/queue.js';
 
   let elapsedTime = 0;
   let timerInterval = null;
+  let queuePollInterval = null;
 
   $: isConnected = $connectionStore.status === 'connected';
   $: isQueued = $matchmakingStore.status === 'queued';
 
+  async function pollQueue() {
+    try {
+      const data = await fetchQueue();
+      matchmakingStore.setQueuedPlayers(data.players, data.count);
+    } catch (e) {
+      console.error('Failed to fetch queue:', e);
+    }
+  }
+
   onMount(() => {
     connect();
+    pollQueue();
+    queuePollInterval = setInterval(pollQueue, 3000);
   });
 
   onDestroy(() => {
     if (timerInterval) clearInterval(timerInterval);
+    if (queuePollInterval) clearInterval(queuePollInterval);
   });
 
   function handleJoinQueue() {
@@ -60,6 +74,17 @@
   {#if $matchmakingStore.error}
     <p class="error">{$matchmakingStore.error}</p>
   {/if}
+
+  <div class="queue-status">
+    <span class="queue-count">{$matchmakingStore.queueCount} player{$matchmakingStore.queueCount === 1 ? '' : 's'} in queue</span>
+    {#if $matchmakingStore.queuedPlayers?.length > 0}
+      <ul class="queue-list">
+        {#each $matchmakingStore.queuedPlayers as player}
+          <li class="queue-player">{player?.slice(0, 8) ?? 'unknown'}...</li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 
   <div class="queue-section">
     {#if isQueued}
@@ -140,6 +165,35 @@
   .error {
     color: #ff4466;
     margin-bottom: 16px;
+  }
+
+  .queue-status {
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .queue-count {
+    color: #888;
+    font-size: 14px;
+  }
+
+  .queue-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .queue-player {
+    font-size: 12px;
+    color: #666;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    background: rgba(255,255,255,0.05);
+    padding: 4px 8px;
+    border-radius: 4px;
   }
 
   .queue-section {

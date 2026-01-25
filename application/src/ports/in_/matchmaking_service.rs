@@ -45,4 +45,8 @@ impl MatchmakingService {
         self.notifier.broadcast(&event).await;
         event
     }
+
+    pub fn get_queue(&self) -> Vec<PlayerId> {
+        self.queue.queue().clone()
+    }
 }

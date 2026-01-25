@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use axum::Json;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -239,4 +241,17 @@ async fn handle_messages(
 
     info!(player_id = ?player_id, "Player disconnected");
     state.notifier.unregister_player(player_id).await;
+}
+
+#[derive(Serialize)]
+pub struct QueueResponse {
+    players: Vec<PlayerId>,
+    count: usize,
+}
+
+pub async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueResponse> {
+    let matchmaking = state.matchmaking_service.lock().await;
+    let players = matchmaking.get_queue();
+    let count = players.len();
+    Json(QueueResponse { players, count })
 }

@@ -1,5 +1,6 @@
-mod websocket;
+mod web;
 
-pub use websocket::{
-    AppState, IncomingMessage, QueueResponse, WebSocketNotifier, create_app_state, get_queue, handle_connection,
+pub use web::{
+    create_app_state, get_queue, handle_connection, AppState, IncomingMessage, QueueResponse,
+    WebSocketNotifier,
 };

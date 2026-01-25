@@ -1,24 +1,18 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use axum::Json;
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::State;
 use axum::response::IntoResponse;
-use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
+use futures::stream::SplitStream;
+use futures::StreamExt;
 use serde::Deserialize;
-use serde::Serialize;
-use tokio::sync::{Mutex as TokioMutex, RwLock};
 use tracing::{debug, info, warn};
 
-use application::ports::in_::game_service::{GameStore, GameUseCase};
-use application::ports::in_::{MatchmakingService, game_service};
-use application::ports::out_::{GameEventNotifier, GameNotification, QueueNotifier};
+use application::ports::in_::game_service::GameUseCase;
+use application::ports::in_::game_service;
 use domain::{GameId, MatchmakingOutcome, PlayerId};
 
-type WebSocketSender = SplitSink<WebSocket, Message>;
+use crate::web::state::AppState;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -29,112 +23,6 @@ pub enum IncomingMessage {
     PlaceAsk { game_id: GameId, value: i32 },
     CancelBid { game_id: GameId, price: i32 },
     CancelAsk { game_id: GameId, price: i32 },
-}
-
-pub struct AppState {
-    pub notifier: Arc<WebSocketNotifier>,
-    pub game_store: GameStore,
-    pub matchmaking_service: Arc<TokioMutex<MatchmakingService>>,
-}
-
-impl AppState {
-    pub fn new(
-        notifier: Arc<WebSocketNotifier>,
-        game_store: GameStore,
-        matchmaking_service: Arc<TokioMutex<MatchmakingService>>,
-    ) -> Self {
-        Self {
-            notifier,
-            game_store,
-            matchmaking_service,
-        }
-    }
-}
-
-pub fn create_app_state() -> Arc<AppState> {
-    let notifier = Arc::new(WebSocketNotifier::new());
-    let game_store = Arc::new(RwLock::new(HashMap::new()));
-    let queue_notifier: Arc<dyn QueueNotifier> = notifier.clone();
-    let matchmaking_service = MatchmakingService::new(queue_notifier);
-
-    Arc::new(AppState::new(
-        notifier,
-        game_store,
-        Arc::new(TokioMutex::new(matchmaking_service)),
-    ))
-}
-
-pub struct WebSocketNotifier {
-    connections: RwLock<Vec<(PlayerId, TokioMutex<WebSocketSender>)>>,
-}
-
-impl WebSocketNotifier {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            connections: RwLock::new(Vec::new()),
-        }
-    }
-
-    pub async fn register_player(
-        &self,
-        player_id: PlayerId,
-        sender: WebSocketSender,
-    ) {
-        self.connections.write().await.push((player_id, TokioMutex::new(sender)));
-    }
-
-    pub async fn unregister_player(
-        &self,
-        player_id: PlayerId,
-    ) {
-        self.connections.write().await.retain(|(pid, _)| *pid != player_id);
-    }
-
-    async fn send_to_player(
-        &self,
-        player_id: PlayerId,
-        message: &str,
-    ) {
-        debug!(player_id = ?player_id, message = %message, "-> Sending");
-        let connections = self.connections.read().await;
-        if let Some((_, sender)) = connections.iter().find(|(pid, _)| *pid == player_id) {
-            let _ = sender.lock().await.send(Message::Text(message.into())).await;
-        }
-    }
-}
-
-impl Default for WebSocketNotifier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl GameEventNotifier for WebSocketNotifier {
-    async fn notify_player(
-        &self,
-        player_id: PlayerId,
-        notification: GameNotification,
-    ) {
-        let message = serde_json::to_string(&notification).unwrap_or_default();
-        self.send_to_player(player_id, &message).await;
-    }
-}
-
-#[async_trait]
-impl QueueNotifier for WebSocketNotifier {
-    async fn broadcast(
-        &self,
-        event: &MatchmakingOutcome,
-    ) {
-        let message = serde_json::to_string(event).unwrap_or_default();
-        let connections = self.connections.read().await;
-        for (player_id, sender) in connections.iter() {
-            debug!(player_id = ?player_id, message = %message, "-> Broadcasting");
-            let _ = sender.lock().await.send(Message::Text(message.clone().into())).await;
-        }
-    }
 }
 
 pub async fn handle_connection(
@@ -229,7 +117,12 @@ async fn handle_messages(
                         }
                     }
                     IncomingMessage::LeaveQueue => {
-                        state.matchmaking_service.lock().await.remove_player(player_id).await;
+                        state
+                            .matchmaking_service
+                            .lock()
+                            .await
+                            .remove_player(player_id)
+                            .await;
                     }
                 },
                 Err(e) => {
@@ -241,17 +134,4 @@ async fn handle_messages(
 
     info!(player_id = ?player_id, "Player disconnected");
     state.notifier.unregister_player(player_id).await;
-}
-
-#[derive(Serialize)]
-pub struct QueueResponse {
-    players: Vec<PlayerId>,
-    count: usize,
-}
-
-pub async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueResponse> {
-    let matchmaking = state.matchmaking_service.lock().await;
-    let players = matchmaking.get_queue();
-    let count = players.len();
-    Json(QueueResponse { players, count })
 }

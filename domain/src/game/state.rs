@@ -6,9 +6,8 @@ use crate::PlayerId;
 use super::{
     action::GameAction,
     config::{GameConfig, GamePhase},
-    effect::GameEffect,
+    effect::{GameEffect, GameEvent},
     error::GameError,
-    event::GameEvent,
     player::PlayerState,
     ticker::PlayerTicker,
 };

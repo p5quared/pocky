@@ -2,6 +2,6 @@ mod http;
 mod state;
 mod websocket;
 
-pub use http::{get_queue, QueueResponse};
-pub use state::{create_app_state, AppState};
-pub use websocket::{handle_connection, IncomingMessage, WebSocketNotifier};
+pub use http::{GetQueueResponse, get_queue};
+pub use state::{AppState, create_app_state};
+pub use websocket::{IncomingMessage, WebSocketNotifier, handle_connection};

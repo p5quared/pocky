@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use serde::Serialize;
 
 use domain::PlayerId;
@@ -9,14 +9,14 @@ use domain::PlayerId;
 use super::state::AppState;
 
 #[derive(Serialize)]
-pub struct QueueResponse {
+pub struct GetQueueResponse {
     players: Vec<PlayerId>,
     count: usize,
 }
 
-pub async fn get_queue(State(state): State<Arc<AppState>>) -> Json<QueueResponse> {
+pub async fn get_queue(State(state): State<Arc<AppState>>) -> Json<GetQueueResponse> {
     let matchmaking = state.matchmaking_service.lock().await;
     let players = matchmaking.get_queue();
     let count = players.len();
-    Json(QueueResponse { players, count })
+    Json(GetQueueResponse { players, count })
 }

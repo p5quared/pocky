@@ -1,10 +1,10 @@
 <script>
-  import { gameStore, profitLoss } from '../lib/stores/game.js';
+  import { gameStore, profitLoss, computePlayerStats } from '../lib/stores/game.js';
   import { matchmakingStore } from '../lib/stores/matchmaking.js';
   import { send } from '../lib/websocket/client.js';
-  import { placeBid, placeAsk, cancelBid, cancelAsk } from '../lib/websocket/messages.js';
+  import { placeBid, placeAsk } from '../lib/websocket/messages.js';
   import InfoBox from '../lib/components/InfoBox.svelte';
-  import PriceChart from '../lib/components/PriceChart.svelte';
+  import PlayerCard from '../lib/components/PlayerCard.svelte';
 
   $: myId = $matchmakingStore.playerId;
   $: isEnded = $gameStore.phase === 'ended';
@@ -12,27 +12,8 @@
   $: myResult = $gameStore.finalBalances.find(b => b.playerId === myId);
   $: otherResults = $gameStore.finalBalances.filter(b => b.playerId !== myId);
 
-  // Aggregate orders by price level for orderbook display
-  function aggregateOrders(orders, myId) {
-    const grouped = {};
-    orders.forEach(o => {
-      if (!grouped[o.value]) {
-        grouped[o.value] = { count: 0, hasMine: false };
-      }
-      grouped[o.value].count += 1;
-      if (o.playerId === myId) {
-        grouped[o.value].hasMine = true;
-      }
-    });
-    return Object.entries(grouped)
-      .map(([price, data]) => ({ price: Number(price), quantity: data.count, hasMine: data.hasMine }))
-      .sort((a, b) => b.price - a.price);
-  }
-
-  $: orderBook = {
-    bids: aggregateOrders($gameStore.openOrders.filter(o => o.type === 'bid'), myId),
-    asks: aggregateOrders($gameStore.openOrders.filter(o => o.type === 'ask'), myId)
-  };
+  $: myPlayerData = $gameStore.players[myId];
+  $: myStats = myPlayerData ? computePlayerStats(myPlayerData, $gameStore.startingBalance) : null;
 
   function handleKeydown(event) {
     if (isEnded || isCountdown) return;
@@ -51,7 +32,7 @@
 
   function handleBid() {
     const gameId = gameStore.getGameId();
-    const price = $gameStore.currentPrice;
+    const price = myPlayerData?.currentPrice;
     if (gameId && price > 0) {
       send(placeBid(gameId, price));
     }
@@ -59,7 +40,7 @@
 
   function handleAsk() {
     const gameId = gameStore.getGameId();
-    const price = $gameStore.currentPrice;
+    const price = myPlayerData?.currentPrice;
     if (gameId && price > 0) {
       send(placeAsk(gameId, price));
     }
@@ -68,20 +49,6 @@
   function handleReturn() {
     gameStore.reset();
     matchmakingStore.reset();
-  }
-
-  function handleCancelBid(price) {
-    const gameId = gameStore.getGameId();
-    if (gameId) {
-      send(cancelBid(gameId, price));
-    }
-  }
-
-  function handleCancelAsk(price) {
-    const gameId = gameStore.getGameId();
-    if (gameId) {
-      send(cancelAsk(gameId, price));
-    }
   }
 
   function formatPL(value) {
@@ -123,55 +90,21 @@
     </div>
   {/if}
 
-  <div class="main-content">
-    <div class="chart-panel">
-      <div class="panel-header">PRICE HISTORY</div>
-      <PriceChart priceHistory={$gameStore.priceHistory} />
-    </div>
-
-    <div class="orderbook-panel">
-      <div class="orderbook-header">ORDER BOOK</div>
-      <div class="orderbook-columns">
-        <span>BID</span>
-        <span>PRICE</span>
-        <span>ASK</span>
-      </div>
-      <div class="orderbook-body">
-        {#each orderBook.asks as ask}
-          <div class="orderbook-row ask-row">
-            <span class="bid-qty"></span>
-            <span class="price ask-price">{ask.price}</span>
-            <span class="ask-qty">
-              {ask.quantity}
-              {#if ask.hasMine}
-                <button class="cancel-btn" on:click={() => handleCancelAsk(ask.price)}>×</button>
-              {/if}
-            </span>
-          </div>
-        {/each}
-        {#each orderBook.bids as bid}
-          <div class="orderbook-row bid-row">
-            <span class="bid-qty">
-              {#if bid.hasMine}
-                <button class="cancel-btn" on:click={() => handleCancelBid(bid.price)}>×</button>
-              {/if}
-              {bid.quantity}
-            </span>
-            <span class="price bid-price">{bid.price}</span>
-            <span class="ask-qty"></span>
-          </div>
-        {/each}
-        {#if orderBook.asks.length === 0 && orderBook.bids.length === 0}
-          <div class="orderbook-empty">No orders</div>
-        {/if}
-      </div>
-    </div>
+  <div class="players-grid">
+    {#each Object.entries($gameStore.players) as [playerId, playerData]}
+      <PlayerCard
+        {playerId}
+        {playerData}
+        isCurrentPlayer={playerId === myId}
+        startingBalance={$gameStore.startingBalance}
+      />
+    {/each}
   </div>
 
   <div class="info-row">
-    <InfoBox label="Price" value={$gameStore.currentPrice} />
-    <InfoBox label="Balance" value={`$${$gameStore.balance}`} />
-    <InfoBox label="Shares" value={$gameStore.shares} />
+    <InfoBox label="Price" value={myPlayerData?.currentPrice ?? 0} />
+    <InfoBox label="Balance" value={`$${myStats?.balance ?? 0}`} />
+    <InfoBox label="Shares" value={myStats?.shares ?? 0} />
     <InfoBox label="P/L" value={formatPL($profitLoss)} />
   </div>
 
@@ -259,115 +192,11 @@
     color: #ff9500;
   }
 
-  .main-content {
-    display: flex;
+  .players-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
     gap: 16px;
     margin-bottom: 20px;
-  }
-
-  .chart-panel {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .panel-header {
-    font-size: 12px;
-    font-weight: 600;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    margin-bottom: 8px;
-  }
-
-  .orderbook-panel {
-    width: 200px;
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .orderbook-header {
-    padding: 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #666;
-    text-align: center;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-  }
-
-  .orderbook-columns {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    padding: 8px 12px;
-    font-size: 10px;
-    color: #888888;
-    text-transform: uppercase;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    text-align: center;
-  }
-
-  .orderbook-body {
-    flex: 1;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-  }
-
-  .orderbook-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    padding: 4px 12px;
-    font-size: 13px;
-    text-align: center;
-  }
-
-  .orderbook-row:hover {
-    background: rgba(255,255,255,0.03);
-  }
-
-  .bid-qty {
-    color: #00ff88;
-  }
-
-  .ask-qty {
-    color: #ff4466;
-  }
-
-  .bid-price {
-    color: #00ff88;
-  }
-
-  .ask-price {
-    color: #ff4466;
-  }
-
-  .orderbook-empty {
-    padding: 20px;
-    text-align: center;
-    color: #888888;
-    font-size: 12px;
-  }
-
-  .cancel-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0 4px;
-    opacity: 0;
-    transition: opacity 0.15s, color 0.15s;
-  }
-
-  .orderbook-row:hover .cancel-btn {
-    opacity: 1;
-  }
-
-  .cancel-btn:hover {
-    color: #ff4466;
   }
 
   .info-row {

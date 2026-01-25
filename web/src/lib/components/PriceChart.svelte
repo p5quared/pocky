@@ -2,13 +2,17 @@
   import { onMount, onDestroy } from 'svelte';
 
   export let priceHistory = [];
+  export let compact = false;
 
   let containerEl;
   let width = 800;
-  let height = 400;
+  let height = compact ? 150 : 400;
   let resizeObserver;
 
-  const padding = { top: 20, right: 60, bottom: 40, left: 20 };
+  // Generate unique ID for this chart instance (for SVG defs)
+  const chartId = Math.random().toString(36).slice(2, 9);
+
+  const padding = { top: 20, right: 60, bottom: compact ? 10 : 40, left: 20 };
   const WINDOW_SIZE = 120; // 60 seconds at 500ms tick interval
 
   // Sliding window of visible data
@@ -55,7 +59,7 @@
 
   $: gridLines = (() => {
     const lines = [];
-    const numLines = 5;
+    const numLines = compact ? 3 : 5;
     const range = paddedMax - paddedMin || 1;
     for (let i = 0; i <= numLines; i++) {
       const y = padding.top + (i / numLines) * chartHeight;
@@ -86,17 +90,19 @@
 
 <div
   class="chart-wrapper"
+  class:compact
   bind:this={containerEl}
   role="img"
   aria-label="Price chart"
+  style="height: {height}px"
 >
   <svg viewBox="0 0 {width} {height}" preserveAspectRatio="none">
     <defs>
-      <linearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <linearGradient id="chartGradient-{chartId}" x1="0%" y1="0%" x2="0%" y2="100%">
         <stop offset="0%" stop-color={lineColor} stop-opacity="0.3" />
         <stop offset="100%" stop-color={lineColor} stop-opacity="0" />
       </linearGradient>
-      <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <filter id="glow-{chartId}" x="-50%" y="-50%" width="200%" height="200%">
         <feGaussianBlur stdDeviation="3" result="blur"/>
         <feMerge>
           <feMergeNode in="blur"/>
@@ -128,7 +134,7 @@
 
     {#if priceHistory.length > 0}
       <!-- Area fill -->
-      <path d={areaPath} fill="url(#chartGradient)" />
+      <path d={areaPath} fill="url(#chartGradient-{chartId})" />
 
       <!-- Price line with glow -->
       <path
@@ -136,7 +142,7 @@
         fill="none"
         stroke={lineColor}
         stroke-width="2"
-        filter="url(#glow)"
+        filter="url(#glow-{chartId})"
       />
 
       <!-- Current price dot -->
@@ -146,26 +152,27 @@
           cy={lastPoint.y}
           r="5"
           fill={lineColor}
-          filter="url(#glow)"
+          filter="url(#glow-{chartId})"
         />
       {/if}
     {/if}
 
   </svg>
 
-  <div class="time-labels">
-    <span>60s ago</span>
-    <span>45s</span>
-    <span>30s</span>
-    <span>15s</span>
-    <span>Now</span>
-  </div>
+  {#if !compact}
+    <div class="time-labels">
+      <span>60s ago</span>
+      <span>45s</span>
+      <span>30s</span>
+      <span>15s</span>
+      <span>Now</span>
+    </div>
+  {/if}
 </div>
 
 <style>
   .chart-wrapper {
     width: 100%;
-    height: 400px;
     position: relative;
     background: rgba(255,255,255,0.02);
     border: 1px solid rgba(255,255,255,0.06);
@@ -173,10 +180,18 @@
     overflow: hidden;
   }
 
+  .chart-wrapper.compact {
+    border-radius: 8px;
+  }
+
   svg {
     width: 100%;
-    height: calc(100% - 30px);
+    height: 100%;
     display: block;
+  }
+
+  .chart-wrapper:not(.compact) svg {
+    height: calc(100% - 30px);
   }
 
   .time-labels {

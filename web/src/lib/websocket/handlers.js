@@ -51,15 +51,7 @@ function handleGameNotification(msg) {
       break;
 
     case 'price_changed':
-      gameStore.updatePrice(msg.price);
-      break;
-
-    case 'bid_placed':
-      gameStore.addOrder('bid', msg.player_id, msg.bid_value);
-      break;
-
-    case 'ask_placed':
-      gameStore.addOrder('ask', msg.player_id, msg.ask_value);
+      gameStore.updatePrice(msg.player_id, msg.price);
       break;
 
     case 'bid_filled':
@@ -68,14 +60,6 @@ function handleGameNotification(msg) {
 
     case 'ask_filled':
       gameStore.fillAsk(msg.player_id, msg.ask_value);
-      break;
-
-    case 'bid_canceled':
-      gameStore.cancelOrder('bid', msg.player_id, msg.price);
-      break;
-
-    case 'ask_canceled':
-      gameStore.cancelOrder('ask', msg.player_id, msg.price);
       break;
 
     case 'game_ended':

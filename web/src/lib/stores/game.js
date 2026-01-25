@@ -6,16 +6,10 @@ function createGameStore() {
     phase: null, // null | countdown | running | ended
     gameId: null,
     countdown: 0,
-    currentPrice: 0,
-    priceHistory: [], // { time, value }
-    balance: 0,
     startingBalance: 0,
-    shares: 0,
-    openOrders: [], // { type: 'bid'|'ask', playerId, value }
-    cursorPrice: 0,
-    players: [],
-    finalBalances: [], // { playerId, balance }
-    balanceHistory: [] // { time, value }
+    startingPrice: 0,
+    players: {}, // { [playerId]: { priceHistory, currentPrice, purchasePrices, salePrices } }
+    finalBalances: [] // { playerId, balance }
   });
 
   let gameStartTime = null;
@@ -32,96 +26,79 @@ function createGameStore() {
       }));
     },
 
-    startGame: (gameId, startingPrice, startingBalance, players) => {
+    startGame: (gameId, startingPrice, startingBalance, playerIds) => {
       gameStartTime = Date.now();
+      const players = {};
+      playerIds.forEach(id => {
+        players[id] = {
+          priceHistory: [{ time: 0, value: startingPrice }],
+          currentPrice: startingPrice,
+          purchasePrices: [],
+          salePrices: []
+        };
+      });
       set({
         phase: 'running',
         gameId,
         countdown: 0,
-        currentPrice: startingPrice,
-        priceHistory: [{ time: 0, value: startingPrice }],
-        balance: startingBalance,
         startingBalance,
-        shares: 0,
-        openOrders: [],
-        cursorPrice: startingPrice,
+        startingPrice,
         players,
-        finalBalances: [],
-        balanceHistory: [{ time: 0, value: startingBalance }]
+        finalBalances: []
       });
     },
 
-    updatePrice: (price) => {
+    updatePrice: (playerId, price) => {
       update(s => {
         const elapsed = gameStartTime ? (Date.now() - gameStartTime) / 1000 : 0;
+        const player = s.players[playerId];
+        if (!player) return s;
         return {
           ...s,
-          currentPrice: price,
-          priceHistory: [...s.priceHistory, { time: elapsed, value: price }]
+          players: {
+            ...s.players,
+            [playerId]: {
+              ...player,
+              currentPrice: price,
+              priceHistory: [...player.priceHistory, { time: elapsed, value: price }]
+            }
+          }
         };
       });
     },
 
-    addOrder: (type, playerId, value) => {
-      update(s => ({
-        ...s,
-        openOrders: [...s.openOrders, { type, playerId, value }]
-      }));
-    },
-
-    fillBid: (playerId, bidValue) => {
+    fillBid: (playerId, fillPrice) => {
       update(s => {
-        const myId = matchmakingStore.getPlayerId();
-        const isMine = playerId === myId;
-        const newBalance = isMine ? s.balance - bidValue : s.balance;
-        let elapsed = gameStartTime ? (Date.now() - gameStartTime) / 1000 : 0;
-        // Ensure strictly increasing time for chart library
-        const lastTime = s.balanceHistory.length > 0 ? s.balanceHistory[s.balanceHistory.length - 1].time : -1;
-        if (elapsed <= lastTime) {
-          elapsed = lastTime + 0.001;
-        }
+        const player = s.players[playerId];
+        if (!player) return s;
         return {
           ...s,
-          openOrders: s.openOrders.filter(
-            o => !(o.type === 'bid' && o.playerId === playerId && o.value === bidValue)
-          ),
-          balance: newBalance,
-          shares: isMine ? s.shares + 1 : s.shares,
-          balanceHistory: isMine ? [...s.balanceHistory, { time: elapsed, value: newBalance }] : s.balanceHistory
+          players: {
+            ...s.players,
+            [playerId]: {
+              ...player,
+              purchasePrices: [...player.purchasePrices, fillPrice]
+            }
+          }
         };
       });
     },
 
-    fillAsk: (playerId, askValue) => {
+    fillAsk: (playerId, fillPrice) => {
       update(s => {
-        const myId = matchmakingStore.getPlayerId();
-        const isMine = playerId === myId;
-        const newBalance = isMine ? s.balance + askValue : s.balance;
-        let elapsed = gameStartTime ? (Date.now() - gameStartTime) / 1000 : 0;
-        // Ensure strictly increasing time for chart library
-        const lastTime = s.balanceHistory.length > 0 ? s.balanceHistory[s.balanceHistory.length - 1].time : -1;
-        if (elapsed <= lastTime) {
-          elapsed = lastTime + 0.001;
-        }
+        const player = s.players[playerId];
+        if (!player) return s;
         return {
           ...s,
-          openOrders: s.openOrders.filter(
-            o => !(o.type === 'ask' && o.playerId === playerId && o.value === askValue)
-          ),
-          balance: newBalance,
-          shares: isMine ? s.shares - 1 : s.shares,
-          balanceHistory: isMine ? [...s.balanceHistory, { time: elapsed, value: newBalance }] : s.balanceHistory
+          players: {
+            ...s.players,
+            [playerId]: {
+              ...player,
+              salePrices: [...player.salePrices, fillPrice]
+            }
+          }
         };
       });
-    },
-
-    cancelOrder: (type, playerId, price) => {
-      update(s => ({
-        ...s,
-        openOrders: s.openOrders.filter(
-          o => !(o.type === type && o.playerId === playerId && o.value === price)
-        )
-      }));
     },
 
     endGame: (finalBalances) => {
@@ -132,36 +109,16 @@ function createGameStore() {
       }));
     },
 
-    moveCursor: (delta) => {
-      update(s => ({
-        ...s,
-        cursorPrice: Math.max(1, s.cursorPrice + delta)
-      }));
-    },
-
-    setCursor: (value) => {
-      update(s => ({
-        ...s,
-        cursorPrice: Math.max(1, value)
-      }));
-    },
-
     reset: () => {
       gameStartTime = null;
       set({
         phase: null,
         gameId: null,
         countdown: 0,
-        currentPrice: 0,
-        priceHistory: [],
-        balance: 0,
         startingBalance: 0,
-        shares: 0,
-        openOrders: [],
-        cursorPrice: 0,
-        players: [],
-        finalBalances: [],
-        balanceHistory: []
+        startingPrice: 0,
+        players: {},
+        finalBalances: []
       });
     },
 
@@ -171,9 +128,25 @@ function createGameStore() {
 
 export const gameStore = createGameStore();
 
-// Derived store for P/L calculation
+// Helper function to compute player stats from fill prices
+export function computePlayerStats(player, startingBalance) {
+  const shares = player.purchasePrices.length - player.salePrices.length;
+  const totalPurchased = player.purchasePrices.reduce((a, b) => a + b, 0);
+  const totalSold = player.salePrices.reduce((a, b) => a + b, 0);
+  const balance = startingBalance - totalPurchased + totalSold;
+  const costBasis = player.purchasePrices.length > 0
+    ? Math.round(totalPurchased / player.purchasePrices.length)
+    : null;
+  return { balance, shares, costBasis };
+}
+
+// Derived store for current player's P/L calculation
 export const profitLoss = derived(gameStore, $game => {
   if (!$game.phase) return 0;
-  const portfolioValue = $game.balance + ($game.shares * $game.currentPrice);
+  const myId = matchmakingStore.getPlayerId();
+  const player = $game.players[myId];
+  if (!player) return 0;
+  const stats = computePlayerStats(player, $game.startingBalance);
+  const portfolioValue = stats.balance + (stats.shares * player.currentPrice);
   return portfolioValue - $game.startingBalance;
 });

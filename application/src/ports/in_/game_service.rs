@@ -120,7 +120,7 @@ fn process_effects<N: GameEventNotifier + 'static>(
 ) {
     for effect in effects {
         match effect {
-            GameEffect::Notify { player_id, event } => {
+            GameEffect::Notification { player_id, event } => {
                 let notification = match event {
                     GameEvent::Countdown(remaining) => GameNotification::Countdown { game_id, remaining },
                     GameEvent::GameStarted {

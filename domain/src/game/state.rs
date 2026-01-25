@@ -113,7 +113,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&player_id| GameEffect::Notify {
+            .map(|&player_id| GameEffect::Notification {
                 player_id,
                 event: GameEvent::Countdown(remaining),
             })
@@ -133,7 +133,7 @@ impl GameState {
 
         let player_ids: Vec<PlayerId> = self.players.keys().copied().collect();
 
-        let started_notifications = player_ids.iter().map(|&player_id| GameEffect::Notify {
+        let started_notifications = player_ids.iter().map(|&player_id| GameEffect::Notification {
             player_id,
             event: GameEvent::GameStarted {
                 starting_price,
@@ -174,7 +174,7 @@ impl GameState {
         let prices: Vec<(PlayerId, i32)> = self.player_tickers.iter().map(|(&pid, pt)| (pid, pt.current_price)).collect();
 
         let price_notifications = player_ids.iter().flat_map(|&notify_player| {
-            prices.iter().map(move |&(ticker_owner, price)| GameEffect::Notify {
+            prices.iter().map(move |&(ticker_owner, price)| GameEffect::Notification {
                 player_id: notify_player,
                 event: GameEvent::PriceChanged {
                     player_id: ticker_owner,
@@ -184,7 +184,7 @@ impl GameState {
         });
 
         let bid_notifications = resolved_bids.into_iter().flat_map(|(order_owner, bid_value)| {
-            player_ids.iter().map(move |&notify_player| GameEffect::Notify {
+            player_ids.iter().map(move |&notify_player| GameEffect::Notification {
                 player_id: notify_player,
                 event: GameEvent::BidFilled {
                     player_id: order_owner,
@@ -194,7 +194,7 @@ impl GameState {
         });
 
         let ask_notifications = resolved_asks.into_iter().flat_map(|(order_owner, ask_value)| {
-            player_ids.iter().map(move |&notify_player| GameEffect::Notify {
+            player_ids.iter().map(move |&notify_player| GameEffect::Notification {
                 player_id: notify_player,
                 event: GameEvent::AskFilled {
                     player_id: order_owner,
@@ -239,7 +239,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&player_id| GameEffect::Notify {
+            .map(|&player_id| GameEffect::Notification {
                 player_id,
                 event: GameEvent::GameEnded {
                     final_balances: final_balances.clone(),
@@ -311,7 +311,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&pid| GameEffect::Notify {
+            .map(|&pid| GameEffect::Notification {
                 player_id: pid,
                 event: GameEvent::BidPlaced { player_id, bid_value },
             })
@@ -346,7 +346,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&pid| GameEffect::Notify {
+            .map(|&pid| GameEffect::Notification {
                 player_id: pid,
                 event: GameEvent::AskPlaced { player_id, ask_value },
             })
@@ -376,7 +376,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&pid| GameEffect::Notify {
+            .map(|&pid| GameEffect::Notification {
                 player_id: pid,
                 event: GameEvent::BidCanceled { player_id, price },
             })
@@ -406,7 +406,7 @@ impl GameState {
         Ok(self
             .players
             .keys()
-            .map(|&pid| GameEffect::Notify {
+            .map(|&pid| GameEffect::Notification {
                 player_id: pid,
                 event: GameEvent::AskCanceled { player_id, price },
             })

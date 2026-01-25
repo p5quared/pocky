@@ -6,7 +6,7 @@ use super::action::GameAction;
 
 #[derive(Clone, Debug)]
 pub enum GameEffect {
-    Notify { player_id: PlayerId, event: GameEvent },
+    Notification { player_id: PlayerId, event: GameEvent },
     DelayedAction { delay: Duration, action: GameAction },
 }
 

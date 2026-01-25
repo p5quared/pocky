@@ -298,7 +298,7 @@ impl TestHarness {
         let effects = self.last_result.as_ref().expect("last action failed");
         for player_id in &self.players {
             let found = effects.iter().any(|e| match e {
-                GameEffect::Notify { player_id: pid, event } if pid == player_id => predicate(event),
+                GameEffect::Notification { player_id: pid, event } if pid == player_id => predicate(event),
                 _ => false,
             });
             assert!(found, "Player {:?} was not notified", player_id);
